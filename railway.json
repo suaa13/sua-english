@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "npx prisma generate --schema prisma/schema.postgres.prisma"
+  },
+  "deploy": {
+    "startCommand": "npx prisma generate --schema prisma/schema.postgres.prisma && npx ts-node --transpile-only src/main.ts",
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 100,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "numReplicas": 1
+  }
+}
