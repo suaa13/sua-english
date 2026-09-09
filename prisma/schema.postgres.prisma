@@ -1,0 +1,306 @@
+// ============================================================
+// SUA English — CANONICAL Prisma schema (PostgreSQL)
+// This is the production / portable target. When deploying with Docker,
+// generate & migrate from THIS file:
+//   npm run prisma:pg generate
+//   npm run db:migrate -- --name init
+//
+// Local zero-install development uses prisma/schema.sqlite.prisma instead
+// (see .env.example). Both schemas are kept in sync manually per phase.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String         @id @default(cuid())
+  email             String         @unique
+  username          String         @unique
+  passwordHash      String
+  avatar            String?
+  targetExam        String         @default("IELTS") // IELTS | TOEFL | BOTH
+  targetScore       Float?
+  currentLevel      String?        // beginner | elementary | intermediate | upper | advanced
+  examDate          DateTime?
+  dailyStudyMinutes Int?
+  // 积分制：注册赠送 10；走平台 server 代理的 AI 调用每次扣 1。
+  credits           Int            @default(10)
+  // 最近签到日 YYYY-MM-DD（服务端本地日期，沿用 StudySession.date 约定，避免时区歧义）
+  lastCheckIn       String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  profile        UserProfile?
+  refreshTokens  RefreshToken[]
+  progress       UserProgress[]
+  studySessions  StudySession[]
+  studyPlan      StudyPlan?
+  wrongQuestions WrongQuestion[]
+  cefrProfile    CefrProfile?
+  learningState  LearningState?
+  weeklyReviews  WeeklyReview[]
+}
+
+model UserProfile {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  englishLevel     String?
+  listeningLevel   String?
+  readingLevel     String?
+  writingLevel     String?
+  speakingLevel    String?
+  vocabularySize   Int      @default(0)
+  ieltsTarget      Float?
+  toeflTarget      Float?
+  studyDays        Int      @default(0)
+  totalStudyMinutes Int     @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique // stored as sha256(jti)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------- Vocabulary ----------------
+model Word {
+  id          String   @id @default(cuid())
+  word        String
+  ipa         String?
+  pos         String? // part of speech, e.g. n. / v. / adj.
+  cn          String? // Chinese meaning
+  en          String? // English definition
+  example     String?
+  exampleCn   String?
+  collocation String?
+  synonym     String?
+  level       String   @default("basic") // basic | ielts | toefl
+  scenario    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([word, level])
+  @@index([level])
+}
+
+// ---------------- Register (语域阶梯) ----------------
+// 同一语义的 4 档语域表达：casual -> neutral -> professional -> executive。
+// 支撑「四档改写」训练：评分看语域适配度，而非对错。
+// 独立于 Word 表，避免污染词汇训练的 level 维度（basic/ielts/toefl）。
+model RegisterPhrase {
+  id        String  @id @default(cuid())
+  cluster   String // 语义簇 key，如 cheap
+  clusterCn String // 语义簇中文名，如 价格低
+  register  String // casual | neutral | professional | executive
+  phrase    String // 英文表达（可为短语或整句）
+  phraseCn  String? // 中文释义
+  room      String? // 典型场合：factory | expo | proposal | email | board | meeting
+  order     Int     @default(0) // 档位序号 0-3
+
+  @@unique([cluster, register, phrase])
+  @@index([cluster])
+  @@index([register])
+}
+
+// ---------------- Grammar ----------------
+model GrammarLesson {
+  id       String   @id @default(cuid())
+  title    String
+  level    String // 0 基础 | 基础 | 中级 | IELTS / TOEFL
+  summary  String?
+  explain  String
+  examples String  // JSON-encoded array of strings
+  exercise String  // JSON-encoded object { type, q, options, answer, hint }
+  order    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([level])
+}
+
+// ---------------- Courses ----------------
+model Course {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  exam        String   @default("General") // IELTS | TOEFL | General
+  level       String   @default("basic")
+  description String?
+  lessons     String   // JSON-encoded array of { id, title, type, refId? }
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------------- Learning Progress ----------------
+model UserProgress {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemType       String // vocab | grammar | course | lesson | listening | reading | writing | speaking
+  itemId         String
+  status         String    @default("not_started") // not_started | learning | completed | mastered
+  correctCount   Int       @default(0)
+  totalCount     Int       @default(0)
+  lastReviewedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, itemType, itemId])
+  @@index([userId])
+  @@index([userId, itemType])
+}
+
+model StudySession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // study day, YYYY-MM-DD (local)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+// ---------------- Question Bank (真题题库) ----------------
+model QuestionBank {
+  id              String   @id @default(cuid())
+  exam            String   @default("IELTS") // IELTS | TOEFL
+  subject         String   // Listening | Reading | Writing | Speaking
+  type            String?  // 题型，如 填空题 / 议论文 / 独立口语
+  difficulty      String   @default("medium") // easy | medium | hard
+  year            String?  // 年份 / 卷号，如 2023 / Vol.17
+  source          String?  // 来源，如 Cambridge IELTS 17
+  title           String
+  prompt          String   // 题目正文
+  referenceAnswer String?  // 参考答案 / 范文要点
+  keyword         String?  // 关键词（单串，便于搜索）
+  tags            String?  // JSON 数组字符串
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([exam])
+  @@index([subject])
+  @@index([exam, subject])
+}
+
+// ---------------- Study Plan (学习计划，跨设备同步) ----------------
+// 每用户一条。`clientUpdatedAt` 是客户端最后修改时间，作为
+// last-write-wins 的比较键（服务端 `updatedAt` 只反映落库时间，不可用于合并）。
+model StudyPlan {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  goal     String  @default("IELTS") // IELTS | TOEFL | CET4 | CET6
+  daily    Int     @default(20)      // 每日题量
+  days     Int     @default(30)      // 周期天数
+  weights  String? // JSON: { "Vocabulary": 40, "Listening": 25, ... }
+  schedule String? // JSON: [{ "date": "2026-08-30", "tasks": [{ "subject", "count" }] }]
+  progress String? // JSON: { "2026-08-30": 12 }
+  streak   Int     @default(0)
+
+  clientUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------- Wrong Questions (错题本 + SM-2 间隔复习) ----------------
+// `deleted` 是墓碑标记：删除必须能跨设备传播，直接物理删会被其他设备的
+// 旧副本重新推回来（"僵尸复活"）。
+model WrongQuestion {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  questionId      String // QuestionBank.id
+  exam            String?
+  subject         String?
+  type            String?
+  title           String?
+  prompt          String?
+  referenceAnswer String?
+
+  // SM-2 调度状态
+  wrongAt    DateTime  @default(now())
+  dueAt      DateTime  @default(now())
+  interval   Int       @default(0)
+  ease       Float     @default(2.5)
+  reps       Int       @default(0)
+  lastReview DateTime?
+
+  deleted Boolean @default(false)
+
+  clientUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, questionId])
+  @@index([userId])
+  @@index([userId, dueAt])
+  @@index([userId, clientUpdatedAt])
+}
+
+// ---------------- CEFR Profile (能力分级 + 诊断，跨设备同步) ----------------
+// 每用户一条。`clientUpdatedAt` 作为 last-write-wins 比较键（与 StudyPlan 同款约定）。
+model CefrProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  overall   String  @default("A1")                 // A1 | A2 | B1 | B2 | C1 | C2
+  skills    String?                                // JSON: { listening, speaking, reading, writing } 各 A1-C2
+  diagnostic String?                               // JSON: 首次 4 项样本 + 0-2 评分 + 日期
+  goal12w   String?                                // JSON: { scene, task, qualityBar, evidence, due }
+
+  clientUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------- 学习状态（每用户唯一，元学习层）----------------
+model LearningState {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  doc String? // JSON: 目标 / 基线 / 已完成 / 错误与待补 / 已验证方法 / 待验证假设 / 下一步
+
+  clientUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------- 每周复盘（每用户多行，按 ISO 周）----------------
+model WeeklyReview {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  weekStart String // 如 2026-W35（ISO 周）
+  doc       String? // JSON: 证据 / 四项检查(完成·质量·保持·迁移 各 0-2) / 错误模式 / 精力 / 下周一件事
+
+  deleted         Boolean   @default(false) // 墓碑
+  clientUpdatedAt DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, weekStart])
+  @@index([userId, clientUpdatedAt])
+}
+

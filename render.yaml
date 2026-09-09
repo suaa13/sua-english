@@ -1,0 +1,25 @@
+# render.yaml — SUA English (NestJS API + static SPA, same-origin single port)
+# Repo root must be the deploy-app/ contents (push deploy-app as the repo root).
+# After deploy: bind custom domain suafl.top in Render dashboard/API, then point
+# DNSPod (via Tencent API) CNAME @ -> <service>.onrender.com. Render auto-issues TLS.
+services:
+  - type: web
+    name: sua-english
+    runtime: node
+    plan: free
+    region: singapore          # close to Supabase ap-southeast-1 (low latency)
+    branch: main
+    buildCommand: npx prisma generate --schema prisma/schema.postgres.prisma
+    startCommand: npx prisma generate --schema prisma/schema.postgres.prisma && npx ts-node --transpile-only src/main.ts
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL       # Supabase Postgres pooler (set in Render dashboard or via API)
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
