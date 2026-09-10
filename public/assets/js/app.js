@@ -28,9 +28,12 @@ document.documentElement.dataset.theme = savedTheme === 'dark' ? 'dark' : 'light
 // ---- Session restore ----
 // If a JWT is present, rehydrate the user from the backend so the nav/account
 // reflect the real account (and refresh silently if the token is still valid).
+// 顺序很关键：先 me() → 再 syncNow() 拉回云端主状态，最后才允许本地上行。
+// 绝不能在这里之前触发任何 push，否则换设备/清缓存后的空状态会覆盖云端的真实数据。
 if (store.isAuthed()) {
   store.me()
-    .then(() => { renderNav(); return syncNow(); })
+    .then(() => syncNow())
+    .then(() => { renderNav(); router.navigate(location.hash || '#/home'); })
     .catch(() => { /* invalid token; stays logged out locally */ });
 }
 

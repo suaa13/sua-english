@@ -1,7 +1,7 @@
 // state.js — global app state, persisted to localStorage
 import { fmtDate, uid } from './ui.js';
 import { api, setTokens, clearTokens, isAuthed, getRefreshToken } from './api.js';
-import { syncNow, flushAndClear, scheduleSync } from './sync.js';
+import { syncNow, flushAndClear, scheduleSync, markAppStateHydrated } from './sync.js';
 
 const KEY = 'sua-english-v1';
 
@@ -43,8 +43,22 @@ function load() {
   return defaultState();
 }
 function persist() {
-  state.savedAt = Date.now();
+  // savedAt 是服务端 last-write-wins 的比较键 —— 只有"确实含学习内容"时才推进它。
+  // 否则冷启动时 me()/主题切换这类纯身份写入也会把时间戳刷成"现在"，
+  // 让一份空壳状态在服务端赢过云端真实数据（真实踩过的坑）。
+  if (hasContent(state)) state.savedAt = Date.now();
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+/** 本地主状态是否含真实学习内容（词汇/错题/活动/模考/计划任一非空）。 */
+function hasContent(s) {
+  if (!s) return false;
+  const vocab = s.vocab && typeof s.vocab === 'object' ? Object.keys(s.vocab).length : 0;
+  const errors = Array.isArray(s.errors) ? s.errors.length : 0;
+  const activity = Array.isArray(s.activity) ? s.activity.length : 0;
+  const mocks = Array.isArray(s.mocks) ? s.mocks.length : 0;
+  const plan = s.plan ? 1 : 0;
+  return vocab + errors + activity + mocks + plan > 0;
 }
 
 export const store = {
@@ -305,10 +319,14 @@ function applyServerDoc(doc) {
 
 document.addEventListener('sync:done', (e) => {
   const app = e && e.detail && e.detail.appState;
-  if (!app || !app.doc) return;
   if (!isAuthed()) return;                 // 游客不接受服务端数据
+  // 只要与服务端完成过一次往返，就解除"空壳不上行"的限制。
+  markAppStateHydrated();
+  if (!app || !app.doc) return;
+  // 本地有更新的内容时不回退（本地为准，稍后会推上去）。
   const serverTs = Number(app.updatedAt) || 0;
-  if (serverTs && state.savedAt && serverTs < state.savedAt) return; // 本地更新就不回退
+  const localHasContent = hasContent(state);
+  if (localHasContent && state.savedAt && serverTs && serverTs < state.savedAt) return;
   if (applyServerDoc(app.doc)) {
     document.dispatchEvent(new CustomEvent('state:hydrated', { detail: { source: 'server' } }));
   }

@@ -26,6 +26,31 @@ const LOCAL_KEY = 'sua_local_only';
 const APP_KEY = 'sua-english-v1';
 const APP_SERVER_KEY = 'sua_app_state';
 
+/**
+ * 「本地主状态是否值得上行」判定。
+ *
+ * 背景（真实事故）：换设备/清缓存后，本地 sua-english-v1 是空壳，
+ * 但 app.js 冷启动会调 syncNow()，把这份空壳连同"当前时间"的 savedAt 推上去。
+ * 服务端只按时间戳做 last-write-wins，于是一个刚打开的空页面就抹掉了
+ * 该账号在云端的真实学习数据。这里加一道闸：本地没有真实内容时，
+ * 绝不发起 appState 上行，等下行回填完成后再允许。
+ */
+function hasMeaningfulAppState(raw) {
+  if (!raw || typeof raw !== 'object') return false;
+  const vocab = raw.vocab && typeof raw.vocab === 'object' ? Object.keys(raw.vocab).length : 0;
+  const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
+  const activity = Array.isArray(raw.activity) ? raw.activity.length : 0;
+  const mocks = Array.isArray(raw.mocks) ? raw.mocks.length : 0;
+  const plan = raw.plan ? 1 : 0;
+  return vocab + errors + activity + mocks + plan > 0;
+}
+
+/** 冷启动 → 首次服务端回填完成前，禁止 appState 上行（防止空壳覆盖云端）。 */
+let appStateHydrated = false;
+/** 本次会话登录后是否已拿到过服务端主状态（含"服务端确实没有"这一结论）。 */
+export function markAppStateHydrated() { appStateHydrated = true; }
+export function isAppStateHydrated() { return appStateHydrated; }
+
 /** 「仅本机存储」开关：打开后即使已登录也不做任何上行。默认关闭（跟随登录）。 */
 export function isLocalOnly() {
   try { return localStorage.getItem(LOCAL_KEY) === '1'; } catch (e) { return false; }
@@ -192,6 +217,9 @@ async function run() {
   // 直接读 localStorage 而不是 import state.js —— 后者 import 了本模块，会形成环。
   const appRaw = jget(APP_KEY, null);
   const appTs = int(appRaw && appRaw.savedAt, 0);
+  // 空壳保护：本地没内容 且 尚未完成首次回填 → 不上行主状态。
+  // 否则一个刚打开的空页面会把云端真实数据覆盖掉（见 hasMeaningfulAppState 注释）。
+  const appUploadable = hasMeaningfulAppState(appRaw) || appStateHydrated;
 
   const body = {
     wrongQuestions: (Array.isArray(items) ? items : []).filter((x) => x && x.id).slice(0, 1000).map(cleanItem),
@@ -205,7 +233,7 @@ async function run() {
   else if (removedAt) body.planRemovedAt = removedAt;
   if (cefr) body.cefr = cefr;
   if (state) body.state = state;
-  if (appRaw && appTs) body.appState = { doc: appRaw, updatedAt: appTs };
+  if (appRaw && appTs && appUploadable) body.appState = { doc: appRaw, updatedAt: appTs };
 
   try {
     const r = await api('/sync/push', { method: 'POST', body: JSON.stringify(body) });
@@ -219,6 +247,9 @@ async function run() {
     if (d.cefr) jset(CEFR_KEY, d.cefr); else del(CEFR_KEY);
     if (d.state) jset(STATE_KEY, d.state); else del(STATE_KEY);
     if (d.appState) jset(APP_SERVER_KEY, d.appState); else del(APP_SERVER_KEY);
+    // 与服务端完成过一次往返后，本地已被权威数据回填（或确认服务端也无数据），
+    // 此后允许正常的 appState 上行，不再受空壳闸门限制。
+    appStateHydrated = true;
     if (Array.isArray(d.weeklyReviews)) {
       const live = d.weeklyReviews.filter((x) => x && !x.deleted);
       jset(REVIEW_KEY, live);
