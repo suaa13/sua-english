@@ -118,7 +118,10 @@ window.addEventListener('page:rendered', (e) => {
         } else {
           const name = root.querySelector('#a-name').value.trim();
           const exam = root.querySelector('#a-exam').value;
-          const username = (name || email.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '');
+          // 昵称常常是中文，而用户名只允许字母/数字/下划线 —— 过滤后可能为空，
+          // 直接回退生成合法用户名，避免用户看到后端的英文校验错误不知所措。
+          let username = (name || email.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '');
+          if (username.length < 3) username = 'user' + String(Date.now()).slice(-6);
           if (!name) { msg.textContent = '请填写昵称'; submit.disabled = false; submit.textContent = '注册并进入'; return; }
           if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(password)) { msg.textContent = '密码至少 8 位，且包含字母和数字'; submit.disabled = false; submit.textContent = '注册并进入'; return; }
           await store.register({
