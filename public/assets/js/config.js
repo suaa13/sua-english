@@ -1,11 +1,13 @@
-// assets/js/config.js — 部署期唯一需要改的前端配置（在 app.js 之前加载）
+// assets/js/config.js — 前端唯一的后端地址配置（必须在 app.js 之前加载）
 //
-// 生产环境（上线后）：把下面的值改成你的后端公网地址，必须带 /api/v1 后缀。
-//   例：https://sua-api.onrender.com/api/v1
-//   例：https://api.sua.eu.org/api/v1
-//
-// 留空 '' 表示「同源」——仅当你把前端也交给后端同一域名托管时才用得到。
-//
-// 本地开发：保持默认即可（前端 :8099 + 后端 :4000 分端口）。
-// 部署版：前后端同源（同一端口），API 基址直接用当前站点 origin
-window.__SUA_API_BASE__ = (typeof location !== 'undefined' ? location.origin : '') + '/api/v1';
+// 规则（自动判断，避免"本地配置被复制到生产"这类事故）：
+//   · 访问地址是 127.0.0.1 / localhost → 走本地后端 http://127.0.0.1:4000/api/v1
+//   · 其他域名（生产）→ 同源，即 location.origin + '/api/v1'
+//     前提：生产由 NestJS 用 express.static 同时托管前端，前后端同源（当前部署方式）
+//   · 若前后端分离部署，在 index.html 里于本文件之前显式设置 window.__SUA_API_BASE__ 即可覆盖。
+(function () {
+  if (window.__SUA_API_BASE__) return;
+  var h = location.hostname;
+  var isLocal = h === '127.0.0.1' || h === 'localhost' || h === '[::1]';
+  window.__SUA_API_BASE__ = isLocal ? 'http://127.0.0.1:4000/api/v1' : location.origin + '/api/v1';
+})();

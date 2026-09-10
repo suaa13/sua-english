@@ -1,13 +1,15 @@
 // state.js — global app state, persisted to localStorage
 import { fmtDate, uid } from './ui.js';
 import { api, setTokens, clearTokens, isAuthed, getRefreshToken } from './api.js';
-import { syncNow, flushAndClear } from './sync.js';
+import { syncNow, flushAndClear, scheduleSync } from './sync.js';
 
 const KEY = 'sua-english-v1';
 
+// 未注册/未登录时的初始状态：一切归零，不预置任何"看起来像真人"的数据。
+// 注册登录后由服务端下发该账号的真实数据（见下方 sync:done 监听）。
 const defaultState = () => ({
   user: {
-    name: '学习者',
+    name: '',
     email: '',
     level: 'beginner',          // beginner | elementary | intermediate | upper | advanced
     levelLabel: '英语 0 基础',
@@ -16,9 +18,9 @@ const defaultState = () => ({
     exam: 'ielts',
     examDate: '',
     dailyMins: 30,
-    joined: fmtDate(),
-    streak: 1,
-    lastActive: fmtDate(),
+    joined: '',
+    streak: 0,
+    lastActive: '',
     credits: 0,            // 后端积分：走平台 AI 代理时每次消耗 1
     lastCheckIn: null,     // 最近签到日 YYYY-MM-DD（服务端日期）
   },
@@ -28,6 +30,7 @@ const defaultState = () => ({
   mocks: [],                    // mock test results
   activity: [],                 // {date, mins, items}
   settings: { theme: 'light' },
+  savedAt: 0,                   // 本地最后落盘时间，作为服务端 last-write-wins 的比较键
 });
 
 let state = load();
@@ -40,6 +43,7 @@ function load() {
   return defaultState();
 }
 function persist() {
+  state.savedAt = Date.now();
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
 }
 
@@ -62,6 +66,7 @@ export const store = {
     cur.lastSeen = fmtDate();
     state.vocab[id] = cur;
     persist();
+    scheduleSync();
   },
   vocabStats() {
     const v = Object.values(state.vocab);
@@ -72,7 +77,10 @@ export const store = {
       new: v.filter(x => x.status === 'new').length,
     };
   },
-  vocabSizeGuess() { return 800 + state.vocab ? Object.values(state.vocab).reduce((a, x) => a + x.correct * 3, 0) : 800; },
+  // 只统计"确实练过"的词，不再凭空加 800 基线（未登录时自然为 0）。
+  vocabSizeGuess() {
+    return Object.values(state.vocab).reduce((a, x) => a + (x.correct || 0) * 3, 0);
+  },
 
   // ---- errors ----
   addError(e) {
@@ -80,6 +88,7 @@ export const store = {
     state.errors.unshift(rec);
     if (state.errors.length > 500) state.errors.length = 500;
     persist();
+    scheduleSync();
     return rec;
   },
   errorStats() {
@@ -87,14 +96,14 @@ export const store = {
     state.errors.forEach(e => { by[e.type] = (by[e.type] || 0) + 1; });
     return by;
   },
-  removeError(id) { state.errors = state.errors.filter(e => e.id !== id); persist(); },
-  clearErrors(type) { if (type) state.errors = state.errors.filter(e => e.type !== type); else state.errors = []; persist(); },
+  removeError(id) { state.errors = state.errors.filter(e => e.id !== id); persist(); scheduleSync(); },
+  clearErrors(type) { if (type) state.errors = state.errors.filter(e => e.type !== type); else state.errors = []; persist(); scheduleSync(); },
 
   // ---- plan ----
-  setPlan(plan) { state.plan = plan; persist(); },
+  setPlan(plan) { state.plan = plan; persist(); scheduleSync(); },
 
   // ---- mock ----
-  addMock(m) { state.mocks.unshift({ id: uid(), ts: Date.now(), ...m }); persist(); },
+  addMock(m) { state.mocks.unshift({ id: uid(), ts: Date.now(), ...m }); persist(); scheduleSync(); },
   mockStats() {
     if (!state.mocks.length) return null;
     const latest = state.mocks[0];
@@ -116,6 +125,7 @@ export const store = {
       state.user.lastActive = today;
     }
     persist();
+    scheduleSync();
   },
   totalMins() { return state.activity.reduce((a, x) => a + (x.mins || 0), 0); },
   totalItems() { return state.activity.reduce((a, x) => a + (x.items || 0), 0); },
@@ -165,7 +175,8 @@ export const store = {
     await flushAndClear();
     try { await api('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken: getRefreshToken() }) }); } catch (e) { /* ignore */ }
     clearTokens();
-    state.user.name = '学习者';
+    // 回到"零数据"的初始态：下一个账号不该看到上一个人的任何痕迹。
+    state = defaultState();
     persist();
   },
 
@@ -176,7 +187,7 @@ export const store = {
       persist();
       return r.data.user;
     } catch (e) {
-      if (e.status === 401) { state.user.name = '学习者'; persist(); }
+      if (e.status === 401) { clearTokens(); state = defaultState(); persist(); }
       throw e;
     }
   },
@@ -253,6 +264,78 @@ export const store = {
     return state.user.credits;
   },
 };
+
+// ---------------------------------------------------------------------------
+// 服务端主状态回填：登录/同步完成后，用账号下的真实数据覆盖本地缓存。
+// 只在已登录时生效 —— 游客态必须保持零数据。
+// ---------------------------------------------------------------------------
+function applyServerDoc(doc) {
+  if (!doc || typeof doc !== 'object') return false;
+  const next = defaultState();
+  // 学习数据域：以服务端为准
+  next.vocab = doc.vocab && typeof doc.vocab === 'object' ? doc.vocab : {};
+  next.errors = Array.isArray(doc.errors) ? doc.errors : [];
+  next.activity = Array.isArray(doc.activity) ? doc.activity : [];
+  next.mocks = Array.isArray(doc.mocks) ? doc.mocks : [];
+  next.plan = doc.plan || null;
+  next.savedAt = Number(doc.savedAt) || 0;
+  // 用户域：只回填统计/偏好类字段，身份字段交给 /auth/me
+  if (doc.user && typeof doc.user === 'object') {
+    next.user.streak = Number(doc.user.streak) || 0;
+    next.user.lastActive = doc.user.lastActive || '';
+    next.user.joined = doc.user.joined || '';
+    next.user.level = doc.user.level || next.user.level;
+    next.user.exam = doc.user.exam || next.user.exam;
+    next.user.ieltsTarget = Number(doc.user.ieltsTarget) || next.user.ieltsTarget;
+    next.user.toeflTarget = Number(doc.user.toeflTarget) || next.user.toeflTarget;
+    next.user.examDate = doc.user.examDate || '';
+    next.user.dailyMins = Number(doc.user.dailyMins) || next.user.dailyMins;
+  }
+  // 会话身份与主题保持不变
+  next.user.id = state.user.id || next.user.id;
+  next.user.name = state.user.name || next.user.name;
+  next.user.email = state.user.email || next.user.email;
+  next.user.credits = state.user.credits;
+  next.user.lastCheckIn = state.user.lastCheckIn;
+  next.settings = state.settings;
+  state = next;
+  persist();
+  return true;
+}
+
+document.addEventListener('sync:done', (e) => {
+  const app = e && e.detail && e.detail.appState;
+  if (!app || !app.doc) return;
+  if (!isAuthed()) return;                 // 游客不接受服务端数据
+  const serverTs = Number(app.updatedAt) || 0;
+  if (serverTs && state.savedAt && serverTs < state.savedAt) return; // 本地更新就不回退
+  if (applyServerDoc(app.doc)) {
+    document.dispatchEvent(new CustomEvent('state:hydrated', { detail: { source: 'server' } }));
+  }
+});
+
+/** 当前账号学习数据打包（供 sync.js 上行）。不含任何令牌/密码。 */
+export function appStateDoc() {
+  return {
+    vocab: state.vocab,
+    errors: state.errors,
+    activity: state.activity,
+    mocks: state.mocks,
+    plan: state.plan,
+    user: {
+      streak: state.user.streak,
+      lastActive: state.user.lastActive,
+      joined: state.user.joined,
+      level: state.user.level,
+      exam: state.user.exam,
+      ieltsTarget: state.user.ieltsTarget,
+      toeflTarget: state.user.toeflTarget,
+      examDate: state.user.examDate,
+      dailyMins: state.user.dailyMins,
+    },
+    savedAt: state.savedAt || Date.now(),
+  };
+}
 
 // derived helpers
 export function accuracy() {

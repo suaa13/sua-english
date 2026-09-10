@@ -132,6 +132,12 @@ router.setNotFound(() => `<div class="container page"><div class="empty"><div cl
 
 router.onAfterRender(() => { renderNav(); animatePage(document.getElementById('app')); });
 
+// 服务端数据回填（登录 / 同步完成）后重绘当前页 —— 否则首页还是渲染时的旧数字。
+document.addEventListener('state:hydrated', () => {
+  renderNav();
+  router.navigate(location.hash || '#/home');
+});
+
 // ---- Start ----
 renderNav();
 router.startRouter();

@@ -26,11 +26,13 @@ function skillEstimates() {
 
 export function render() {
   const u = store.state.user;
+  const authed = store.isAuthed();      // 游客态不展示任何"用户数据"，一律占位
+  const dash = '<span class="muted">—</span>';
   const s = skillEstimates();
   const vs = store.vocabStats();
   const days = store.daysActive();
   const streak = u.streak;
-  const vocabSize = 800 + store.state.activity.reduce((a, x) => a + (x.items || 0) * 2, 0);
+  const vocabSize = store.vocabSizeGuess();
   const items = store.totalItems();
   const tasks = (store.state.plan && store.state.plan.todayTask) || ['每日单词 15 个', '语法基础课 1 节', '跟读练习 5 分钟'];
   const recent = store.state.activity.slice(-4).reverse();
@@ -57,11 +59,12 @@ export function render() {
 
     <!-- Stats -->
     <section class="grid grid-4 mb-6">
-      ${statCard(icon('flame'), days, '学习天数', 'var(--c-read)')}
-      ${statCard(icon('star'), streak, '连续学习', 'var(--c-speak)')}
-      ${statCard(icon('book'), vocabSize.toLocaleString(), '词汇量', 'var(--c-vocab)')}
-      ${statCard(icon('check'), items, '完成题目', 'var(--c-grammar)')}
+      ${statCard(icon('flame'), authed ? days : dash, '学习天数', 'var(--c-read)')}
+      ${statCard(icon('star'), authed ? streak : dash, '连续学习', 'var(--c-speak)')}
+      ${statCard(icon('book'), authed ? vocabSize.toLocaleString() : dash, '词汇量', 'var(--c-vocab)')}
+      ${statCard(icon('check'), authed ? items : dash, '完成题目', 'var(--c-grammar)')}
     </section>
+    ${authed ? '' : guestBanner()}
 
     <!-- Progress + Today -->
     <section class="split mb-6">
@@ -71,15 +74,17 @@ export function render() {
           <span class="badge badge-brand">${u.exam.toUpperCase()}</span>
         </div>
         <div class="row gap-6 wrap" style="align-items:center">
-          <div style="flex:0 0 auto">${donut(Math.min(100, overall / 9 * 100), { label: overall.toFixed(1), sub: '预估总评', color: 'var(--brand)', size: 130 })}</div>
+          <div style="flex:0 0 auto">${authed
+            ? donut(Math.min(100, overall / 9 * 100), { label: overall.toFixed(1), sub: '预估总评', color: 'var(--brand)', size: 130 })
+            : donut(0, { label: '—', sub: '预估总评', color: 'var(--brand)', size: 130 })}</div>
           <div class="chart-pane">${barChart([
             { label: '听力', value: s.Listening, color: 'var(--c-listen)' },
             { label: '阅读', value: s.Reading, color: 'var(--c-read)' },
             { label: '写作', value: s.Writing, color: 'var(--c-write)' },
             { label: '口语', value: s.Speaking, color: 'var(--c-speak)' },
-          ], { height: 180 })}</div>
+          ].map(b => (authed ? b : { ...b, value: 0 })), { height: 180 })}</div>
         </div>
-        <div class="hint mt-3">${s.real === 'mock' ? '数据来自最近一次模考。' : s.real === 'cefr' ? '预估来自你的能力诊断结果；去「模拟考试」获得真实成绩。' : '尚未模考与诊断，显示为按当前水平的保守预估；去「能力诊断」或「模拟考试」获得更准的结果。'}</div>
+        <div class="hint mt-3">${!authed ? '注册并登录后，这里才会记录并显示你的真实学习数据。' : s.real === 'mock' ? '数据来自最近一次模考。' : s.real === 'cefr' ? '预估来自你的能力诊断结果；去「模拟考试」获得真实成绩。' : '尚未模考与诊断，显示为按当前水平的保守预估；去「能力诊断」或「模拟考试」获得更准的结果。'}</div>
       </div>
 
       <div class="card">
@@ -131,6 +136,21 @@ export function render() {
         : `<div class="card card-pad-sm empty" style="padding:32px"><div class="muted">还没有学习记录，点「开始学习」开启第一天吧。</div></div>`}
     </section>
   </div>`;
+}
+
+/** 未注册时的引导条：说明数据只属于账号，注册后才会开始记录。 */
+function guestBanner() {
+  return `<section class="card mb-6" style="border:1px dashed var(--border);background:var(--surface-2)">
+    <div class="row between gap-4 wrap">
+      <div>
+        <div class="card-title">你正在以游客身份浏览</div>
+        <div class="muted text-sm mt-1">词库、课程、真题都可以直接体验；但学习记录、错题本、进度与模考成绩属于账号数据 —— 注册后才会开始记录，并保存在云端（换设备也不会丢）。</div>
+      </div>
+      <div class="row gap-2">
+        <a class="btn btn-primary" href="#/auth">注册 / 登录</a>
+      </div>
+    </div>
+  </section>`;
 }
 
 function statCard(ic, val, lbl, color) {

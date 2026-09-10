@@ -22,6 +22,9 @@ const REVIEW_TOMB_KEY = 'sua_weekly_review_tombstones';
 const PLAN_DEL_KEY = 'sua_plan_removed_at';
 const LAST_KEY = 'sua_sync_last';
 const LOCAL_KEY = 'sua_local_only';
+/** 主状态：本地键（sua-english-v1，由 state.js 维护）+ 服务端副本键。 */
+const APP_KEY = 'sua-english-v1';
+const APP_SERVER_KEY = 'sua_app_state';
 
 /** 「仅本机存储」开关：打开后即使已登录也不做任何上行。默认关闭（跟随登录）。 */
 export function isLocalOnly() {
@@ -185,6 +188,10 @@ async function run() {
   const state = cleanState(jget(STATE_KEY, null));
   const reviews = jget(REVIEW_KEY, []);
   const reviewTombs = jget(REVIEW_TOMB_KEY, []);
+  // 主状态（词汇进度 / 错题 / 每日活动 / 模考 / 计划）：整体一个 JSON 文档上行。
+  // 直接读 localStorage 而不是 import state.js —— 后者 import 了本模块，会形成环。
+  const appRaw = jget(APP_KEY, null);
+  const appTs = int(appRaw && appRaw.savedAt, 0);
 
   const body = {
     wrongQuestions: (Array.isArray(items) ? items : []).filter((x) => x && x.id).slice(0, 1000).map(cleanItem),
@@ -198,6 +205,7 @@ async function run() {
   else if (removedAt) body.planRemovedAt = removedAt;
   if (cefr) body.cefr = cefr;
   if (state) body.state = state;
+  if (appRaw && appTs) body.appState = { doc: appRaw, updatedAt: appTs };
 
   try {
     const r = await api('/sync/push', { method: 'POST', body: JSON.stringify(body) });
@@ -210,6 +218,7 @@ async function run() {
     if (d.plan) jset(PLAN_KEY, d.plan); else del(PLAN_KEY);
     if (d.cefr) jset(CEFR_KEY, d.cefr); else del(CEFR_KEY);
     if (d.state) jset(STATE_KEY, d.state); else del(STATE_KEY);
+    if (d.appState) jset(APP_SERVER_KEY, d.appState); else del(APP_SERVER_KEY);
     if (Array.isArray(d.weeklyReviews)) {
       const live = d.weeklyReviews.filter((x) => x && !x.deleted);
       jset(REVIEW_KEY, live);
@@ -222,7 +231,7 @@ async function run() {
     del(PLAN_DEL_KEY);
     try { localStorage.setItem(LAST_KEY, String(Date.now())); } catch (e) { /* ignore */ }
 
-    const res = { ok: true, items: (d.wrongQuestions || []).length, plan: !!d.plan };
+    const res = { ok: true, items: (d.wrongQuestions || []).length, plan: !!d.plan, appState: d.appState || null };
     document.dispatchEvent(new CustomEvent('sync:done', { detail: res }));
     return res;
   } catch (e) {

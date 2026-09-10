@@ -44,6 +44,7 @@ model User {
   wrongQuestions WrongQuestion[]
   cefrProfile    CefrProfile?
   learningState  LearningState?
+  appState       UserAppState?
   weeklyReviews  WeeklyReview[]
 }
 
@@ -280,6 +281,22 @@ model LearningState {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   doc String? // JSON: 目标 / 基线 / 已完成 / 错误与待补 / 已验证方法 / 待验证假设 / 下一步
+
+  clientUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ---------------- 应用状态快照（学习进度主数据，跨设备同步）----------------
+// 承载前端主状态：词汇练习记录(vocab)、错题(errors)、每日活动(activity)、
+// 模考记录(mocks)、学习计划(plan)、连续天数等。整体作为一个 JSON 文档
+// 做 last-write-wins 合并（与 LearningState 同款约定）。
+model UserAppState {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  doc String? // JSON: { vocab, errors, activity, mocks, plan, user:{streak,...}, savedAt }
 
   clientUpdatedAt DateTime @default(now())
   createdAt       DateTime @default(now())

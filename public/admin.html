@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SUA English · 管理后台</title>
+  <link rel="stylesheet" href="assets/css/tokens.css" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Ctext x='16' y='22' font-size='16' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E" />
+  <meta name="robots" content="noindex, nofollow" />
+  <style>
+    .admin-wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 80px; }
+    .admin-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+    .admin-title { font-size: 26px; font-weight: 780; letter-spacing: -0.02em; margin: 0; }
+    .admin-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+    .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; }
+    .stat-box .v { font-size: 24px; font-weight: 760; letter-spacing: -0.02em; }
+    .stat-box .k { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.admin-table th, table.admin-table td { padding: 10px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    table.admin-table th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+    table.admin-table tbody tr:hover { background: var(--surface-2); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 12px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .kv { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+    .kv span:first-child { color: var(--muted); }
+    .scroll-box { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+    .muted { color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .spacer { flex: 1; }
+    .toast-line { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="admin-wrap">
+    <div class="admin-head">
+      <div>
+        <h1 class="admin-title">SUA English · 管理后台</h1>
+        <div class="admin-sub">查看已注册用户及其产生的学习数据（数据源：PostgreSQL / Supabase）</div>
+      </div>
+      <div class="row">
+        <a class="btn btn-ghost btn-sm" href="./#/home">← 返回站点</a>
+        <button class="btn btn-soft btn-sm" id="btn-refresh">刷新</button>
+        <button class="btn btn-soft btn-sm" id="btn-csv">导出 CSV</button>
+        <button class="btn btn-sm" id="btn-logout">退出</button>
+      </div>
+    </div>
+
+    <!-- 登录 -->
+    <section class="card" id="gate" style="padding:20px">
+      <div class="card-title mb-3">管理员验证</div>
+      <p class="muted" style="font-size:13px;margin:0 0 12px">
+        请输入服务端配置的管理令牌（<span class="mono">ADMIN_TOKEN</span>）。令牌只保存在你本机浏览器，不写入任何用户账号。
+      </p>
+      <div class="row">
+        <input id="token" type="password" placeholder="管理令牌" style="flex:1;min-width:240px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)" />
+        <button class="btn btn-primary" id="btn-login">进入</button>
+      </div>
+      <div class="muted toast-line" id="gate-msg" style="margin-top:10px"></div>
+    </section>
+
+    <!-- 主体 -->
+    <div id="main" style="display:none">
+      <section class="stat-grid" id="overview"></section>
+
+      <section class="card" style="padding:16px;margin-bottom:18px">
+        <div class="row">
+          <input id="q" placeholder="搜索邮箱或用户名" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)" />
+          <button class="btn btn-primary btn-sm" id="btn-search">搜索</button>
+          <button class="btn btn-ghost btn-sm" id="btn-clear">清空</button>
+          <div class="spacer"></div>
+          <button class="btn btn-sm" id="prev">上一页</button>
+          <span class="muted" id="page-label" style="font-size:13px">1 / 1</span>
+          <button class="btn btn-sm" id="next">下一页</button>
+        </div>
+      </section>
+
+      <section class="card" style="padding:0;overflow:hidden">
+        <div style="overflow-x:auto">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>用户</th><th>注册时间</th><th>目标</th><th>积分</th>
+                <th>学习进度</th><th>错题</th><th>学习天数</th><th>主状态</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card" id="detail" style="padding:18px;margin-top:18px;display:none"></section>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var API = (window.__SUA_API_BASE__) || (location.origin + '/api/v1');
+      var TOKEN_KEY = 'sua-admin-token';
+      var state = { page: 1, pageSize: 20, q: '', total: 0 };
+
+      var $ = function (id) { return document.getElementById(id); };
+
+      function token() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
+      function setToken(v) { try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+
+      async function call(path, opts) {
+        var res = await fetch(API + path, Object.assign({ headers: { 'x-admin-token': token() } }, opts || {}));
+        var body = null;
+        try { body = await res.json(); } catch (e) { body = null; }
+        if (res.status === 401 || res.status === 503) {
+          var err = new Error((body && body.message) || '管理令牌无效或未启用');
+          err.code = res.status;
+          throw err;
+        }
+        if (!res.ok) throw new Error((body && body.message) || ('请求失败 ' + res.status));
+        return body && body.data !== undefined ? body.data : body;
+      }
+
+      function fmtDate(v) {
+        if (!v) return '—';
+        var d = new Date(v);
+        return isNaN(d.getTime()) ? String(v) : d.toLocaleString('zh-CN', { hour12: false });
+      }
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+          return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+        });
+      }
+
+      // ---------------- 登录 ----------------
+      async function enter() {
+        var v = ($('token').value || '').trim();
+        if (!v) { $('gate-msg').textContent = '请输入管理令牌'; return; }
+        setToken(v);
+        try {
+          await loadOverview();
+          await loadUsers();
+          $('gate').style.display = 'none';
+          $('main').style.display = '';
+        } catch (e) {
+          setToken('');
+          $('gate-msg').textContent = e.message || '验证失败';
+        }
+      }
+
+      // ---------------- 概览 ----------------
+      async function loadOverview() {
+        var d = await call('/admin/overview');
+        var cards = [
+          ['注册用户', d.users], ['近 7 天新增', d.newUsers7d], ['有学习记录', d.activeUsers],
+          ['学习进度条数', d.progressRows], ['错题条数', d.wrongQuestions],
+          ['学习打卡天数', d.studySessions], ['学习计划', d.studyPlans], ['主状态快照', d.appStates],
+        ];
+        $('overview').innerHTML = cards.map(function (c) {
+          return '<div class="stat-box"><div class="v">' + c[1] + '</div><div class="k">' + c[0] + '</div></div>';
+        }).join('') +
+          '<div class="stat-box" style="grid-column:1/-1"><div class="k">存储位置</div>' +
+          '<div style="margin-top:4px;font-size:13px">' + esc(d.storage.engine) + ' · ' + esc(d.storage.note) + '</div></div>';
+      }
+
+      // ---------------- 用户列表 ----------------
+      async function loadUsers() {
+        var qs = '?page=' + state.page + '&pageSize=' + state.pageSize + (state.q ? '&q=' + encodeURIComponent(state.q) : '');
+        var d = await call('/admin/users' + qs);
+        state.total = d.total || 0;
+        var pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+        $('page-label').textContent = state.page + ' / ' + pages + '（共 ' + state.total + ' 人）';
+        $('rows').innerHTML = (d.items || []).map(function (u) {
+          var c = u.counts || {};
+          return '<tr>' +
+            '<td><div style="font-weight:600">' + esc(u.username) + '</div><div class="mono muted">' + esc(u.email) + '</div></td>' +
+            '<td class="mono">' + fmtDate(u.createdAt) + '</td>' +
+            '<td>' + esc(u.targetExam || '—') + (u.targetScore ? ' ' + esc(u.targetScore) : '') + '</td>' +
+            '<td>' + (u.credits == null ? '—' : u.credits) + '</td>' +
+            '<td>' + (c.progress || 0) + '</td>' +
+            '<td>' + (c.wrongQuestions || 0) + '</td>' +
+            '<td>' + (c.studySessions || 0) + '</td>' +
+            '<td>' + (u.profile ? (u.profile.vocabularySize || 0) + ' 词' : '—') + '</td>' +
+            '<td><button class="btn btn-soft btn-sm" data-id="' + esc(u.id) + '">详情</button></td>' +
+            '</tr>';
+        }).join('') || '<tr><td colspan="9" class="muted">暂无用户</td></tr>';
+
+        Array.prototype.forEach.call($('rows').querySelectorAll('button[data-id]'), function (b) {
+          b.onclick = function () { openDetail(b.getAttribute('data-id')); };
+        });
+      }
+
+      // ---------------- 用户详情 ----------------
+      async function openDetail(id) {
+        var el = $('detail');
+        el.style.display = '';
+        el.innerHTML = '<div class="muted">加载中…</div>';
+        var d;
+        try { d = await call('/admin/users/' + encodeURIComponent(id)); }
+        catch (e) { el.innerHTML = '<div class="muted">' + esc(e.message) + '</div>'; return; }
+
+        var u = d.user, p = d.profile || {}, s = (d.appState && d.appState.summary) || null;
+        var kv = function (k, v) { return '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>'; };
+
+        el.innerHTML =
+          '<div class="row" style="justify-content:space-between;margin-bottom:12px">' +
+            '<div><div style="font-size:18px;font-weight:720">' + esc(u.username) + ' <span class="mono muted" style="font-size:13px">' + esc(u.email) + '</span></div>' +
+            '<div class="admin-sub">注册于 ' + fmtDate(u.createdAt) + ' · ID <span class="mono">' + esc(u.id) + '</span></div></div>' +
+            '<button class="btn btn-ghost btn-sm" id="btn-close">收起</button>' +
+          '</div>' +
+          '<div class="detail-grid">' +
+            '<div><div class="card-title mb-2">账号</div>' +
+              kv('目标考试', esc(u.targetExam || '—')) + kv('目标分数', esc(u.targetScore == null ? '—' : u.targetScore)) +
+              kv('当前水平', esc(u.currentLevel || '—')) + kv('每日时长', esc(u.dailyStudyMinutes || '—') + ' 分钟') +
+              kv('积分', esc(u.credits)) + kv('最近签到', esc(u.lastCheckIn || '未签到')) +
+            '</div>' +
+            '<div><div class="card-title mb-2">学习画像</div>' +
+              kv('词汇量', esc(p.vocabularySize || 0)) + kv('学习天数', esc(p.studyDays || 0)) +
+              kv('累计分钟', esc(p.totalStudyMinutes || 0)) + kv('等级', esc(p.englishLevel || '—')) +
+              kv('IELTS 目标', esc(p.ieltsTarget || '—')) + kv('TOEFL 目标', esc(p.toeflTarget || '—')) +
+            '</div>' +
+            '<div><div class="card-title mb-2">学习数据（主状态快照）</div>' +
+              (s ? (kv('练过的词', s.vocabTracked + '（已掌握 ' + s.vocabKnown + '）') +
+                    kv('累计答题', s.totalItems + ' 题 / ' + s.totalMinutes + ' 分钟') +
+                    kv('活跃天数', s.activityDays) + kv('错题记录', s.errors) +
+                    kv('模考次数', s.mocks) + kv('连续天数', s.streak == null ? '—' : s.streak) +
+                    kv('有计划', s.hasPlan ? '是' : '否') + kv('最后保存', fmtDate(s.savedAt)))
+                  : '<div class="muted" style="font-size:13px">该账号还没有产生主状态数据。</div>') +
+            '</div>' +
+            '<div><div class="card-title mb-2">能力诊断 / 计划</div>' +
+              kv('CEFR 综合', esc(d.cefr ? d.cefr.overall : '—')) +
+              kv('学习计划', d.studyPlan ? (esc(d.studyPlan.goal) + ' · 每日 ' + esc(d.studyPlan.daily) + ' 题') : '—') +
+              kv('计划连续', d.studyPlan ? esc(d.studyPlan.streak) : '—') +
+              kv('周复盘', (d.weeklyReviews || []).length + ' 条') +
+            '</div>' +
+          '</div>' +
+          '<div class="detail-grid" style="margin-top:16px">' +
+            '<div><div class="card-title mb-2">学习进度（最近 ' + (d.progress || []).length + ' 条）</div>' +
+              '<div class="scroll-box"><table class="admin-table"><thead><tr><th>类型</th><th>状态</th><th>正确/总数</th></tr></thead><tbody>' +
+              ((d.progress || []).map(function (x) {
+                return '<tr><td>' + esc(x.itemType) + '</td><td>' + esc(x.status) + '</td><td>' + esc(x.correctCount) + ' / ' + esc(x.totalCount) + '</td></tr>';
+              }).join('') || '<tr><td colspan="3" class="muted">无</td></tr>') +
+              '</tbody></table></div></div>' +
+            '<div><div class="card-title mb-2">错题本（最近 ' + (d.wrongQuestions || []).length + ' 条）</div>' +
+              '<div class="scroll-box"><table class="admin-table"><thead><tr><th>科目</th><th>标题</th><th>加入时间</th></tr></thead><tbody>' +
+              ((d.wrongQuestions || []).map(function (x) {
+                return '<tr><td>' + esc(x.subject || x.exam || '—') + '</td><td>' + esc((x.title || '').slice(0, 40) || '—') + '</td><td class="mono">' + fmtDate(x.wrongAt) + '</td></tr>';
+              }).join('') || '<tr><td colspan="3" class="muted">无</td></tr>') +
+              '</tbody></table></div></div>' +
+          '</div>' +
+          '<div style="margin-top:14px"><div class="card-title mb-2">学习打卡日期（最近 ' + (d.studySessions || []).length + ' 天）</div>' +
+            '<div class="row">' + ((d.studySessions || []).map(function (x) { return '<span class="pill">' + esc(x.date) + '</span>'; }).join('') || '<span class="muted" style="font-size:13px">无</span>') + '</div>' +
+          '</div>';
+
+        $('btn-close').onclick = function () { el.style.display = 'none'; };
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      // ---------------- 事件 ----------------
+      $('btn-login').onclick = enter;
+      $('token').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
+      $('btn-refresh').onclick = function () { loadOverview().then(loadUsers).catch(function (e) { alert(e.message); }); };
+      $('btn-search').onclick = function () { state.q = ($('q').value || '').trim(); state.page = 1; loadUsers().catch(function (e) { alert(e.message); }); };
+      $('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btn-search').click(); });
+      $('btn-clear').onclick = function () { $('q').value = ''; state.q = ''; state.page = 1; loadUsers().catch(function (e) { alert(e.message); }); };
+      $('prev').onclick = function () { if (state.page > 1) { state.page--; loadUsers(); } };
+      $('next').onclick = function () { state.page++; loadUsers().catch(function (e) { alert(e.message); }); };
+      $('btn-logout').onclick = function () { setToken(''); location.reload(); };
+      $('btn-csv').onclick = function () {
+        fetch(API + '/admin/users.csv', { headers: { 'x-admin-token': token() } })
+          .then(function (r) { return r.text(); })
+          .then(function (text) {
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' }));
+            a.download = 'sua-users.csv';
+            a.click();
+          })
+          .catch(function (e) { alert(e.message); });
+      };
+
+      // 已保存过令牌则直接进入
+      if (token()) {
+        loadOverview().then(loadUsers).then(function () {
+          $('gate').style.display = 'none';
+          $('main').style.display = '';
+        }).catch(function (e) {
+          $('gate-msg').textContent = e.message || '验证失败，请重新输入令牌';
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

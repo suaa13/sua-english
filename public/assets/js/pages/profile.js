@@ -13,7 +13,7 @@ export function render() {
   const mins = store.totalMins();
   const items = store.totalItems();
   const vs = store.vocabStats();
-  const vocabSize = 800 + store.state.activity.reduce((a, x) => a + (x.items || 0) * 2, 0);
+  const vocabSize = store.vocabSizeGuess();
   const acc = accuracy();
   const m = store.mockStats();
   const ieltsEst = m?.latest && m.latest.exam === 'ielts' ? m.latest.score : est(5.5, u.level);

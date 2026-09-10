@@ -68,6 +68,24 @@ export class SyncTombstoneDto {
   ts: number;
 }
 
+/**
+ * 应用主状态快照：词汇练习记录 / 错题 / 每日活动 / 模考 / 学习计划 / 连续天数。
+ * 整体作为一个 JSON 文档做 last-write-wins —— 主状态本来就是"最后一次操作后的
+ * 全量"，不需要逐条合并；粗粒度反而不会丢字段。
+ */
+export class SyncAppStateDto {
+  @ApiPropertyOptional({ description: '前端主状态文档（JSON 对象）' })
+  @IsOptional()
+  @IsObject()
+  doc?: Record<string, unknown>;
+
+  @ApiPropertyOptional({ description: '首次写入时间（ms）' })
+  @IsOptional() @IsInt() @Min(0) createdAt?: number;
+
+  @ApiPropertyOptional({ description: '客户端最后修改时间（ms），合并用' })
+  @IsOptional() @IsInt() @Min(0) updatedAt?: number;
+}
+
 export class SyncPlanDto {
   @ApiPropertyOptional({ example: 'IELTS' })
   @IsOptional() @IsString() @MaxLength(32) goal?: string;
@@ -200,6 +218,12 @@ export class SyncPushDto {
   @ValidateNested()
   @Type(() => SyncLearningStateDto)
   state?: SyncLearningStateDto;
+
+  @ApiPropertyOptional({ type: SyncAppStateDto, description: '应用主状态快照（学习进度主数据）' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SyncAppStateDto)
+  appState?: SyncAppStateDto;
 
   @ApiPropertyOptional({ type: [SyncWeeklyReviewDto] })
   @IsOptional()

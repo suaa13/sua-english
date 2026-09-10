@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  SyncCefrDto, SyncLearningStateDto, SyncPlanDto, SyncPushDto,
+  SyncAppStateDto, SyncCefrDto, SyncLearningStateDto, SyncPlanDto, SyncPushDto,
   SyncWeeklyReviewDto, SyncWeeklyReviewTombstoneDto, SyncWrongQuestionDto,
 } from './dto/sync-push.dto';
 
@@ -28,7 +28,7 @@ export class SyncService {
 
   // ---------------- Pull ----------------
   async pull(userId: string) {
-    const [plan, rows, cefr, state, reviews] = await this.prisma.$transaction([
+    const [plan, rows, cefr, state, app, reviews] = await this.prisma.$transaction([
       this.prisma.studyPlan.findUnique({ where: { userId } }),
       this.prisma.wrongQuestion.findMany({
         where: { userId },
@@ -37,9 +37,10 @@ export class SyncService {
       }),
       this.prisma.cefrProfile.findUnique({ where: { userId } }),
       this.prisma.learningState.findUnique({ where: { userId } }),
+      this.prisma.userAppState.findUnique({ where: { userId } }),
       this.prisma.weeklyReview.findMany({ where: { userId }, orderBy: { clientUpdatedAt: 'desc' }, take: 200 }),
     ]);
-    return this.shapeState(plan as PlanRow | null, rows, cefr, state, reviews);
+    return this.shapeState(plan as PlanRow | null, rows, cefr, state, reviews, app);
   }
 
   // ---------------- Push (双向合并) ----------------
@@ -149,6 +150,16 @@ export class SyncService {
         if (!cur || cu > cur.clientUpdatedAt.getTime()) {
           const data = this.stateToRow(dto.state, cu);
           await tx.learningState.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+        }
+      }
+
+      // --- 4.5) 应用主状态（每用户一条，last-write-wins）---
+      if (dto.appState) {
+        const cu = dto.appState.updatedAt ?? Date.now();
+        const cur = await tx.userAppState.findUnique({ where: { userId } });
+        if (!cur || cu > cur.clientUpdatedAt.getTime()) {
+          const data = this.appStateToRow(dto.appState, cu);
+          await tx.userAppState.upsert({ where: { userId }, create: { userId, ...data }, update: data });
         }
       }
 
@@ -272,6 +283,14 @@ export class SyncService {
     };
   }
 
+  private appStateToRow(s: SyncAppStateDto, cu: number) {
+    return {
+      doc: s.doc ? JSON.stringify(s.doc) : null,
+      createdAt: s.createdAt ? new Date(s.createdAt) : new Date(cu),
+      clientUpdatedAt: new Date(cu),
+    };
+  }
+
   private reviewTs(it: SyncWeeklyReviewDto | SyncWeeklyReviewTombstoneDto): number {
     return ('ts' in it) ? it.ts : (it.updatedAt ?? 0);
   }
@@ -295,7 +314,14 @@ export class SyncService {
     }
   }
 
-  private shapeState(plan: PlanRow | null, rows: any[], cefr: any, state: any, reviews: any[]) {
+  private shapeState(
+    plan: PlanRow | null,
+    rows: any[],
+    cefr: any,
+    state: any,
+    reviews: any[],
+    app?: { doc: string | null; createdAt: Date; clientUpdatedAt: Date } | null,
+  ) {
     const live = rows.filter((r) => !r.deleted).slice(0, ITEM_KEEP);
     const liveReviews = reviews.filter((r) => !r.deleted);
     return {
@@ -346,6 +372,13 @@ export class SyncService {
             doc: this.parse<any>(state.doc, null),
             createdAt: state.createdAt.getTime(),
             updatedAt: state.clientUpdatedAt.getTime(),
+          }
+        : null,
+      appState: app
+        ? {
+            doc: this.parse<any>(app.doc, null),
+            createdAt: app.createdAt.getTime(),
+            updatedAt: app.clientUpdatedAt.getTime(),
           }
         : null,
       weeklyReviews: liveReviews.map((r) => ({

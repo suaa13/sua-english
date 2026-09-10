@@ -14,6 +14,7 @@ import { ProgressModule } from './progress/progress.module';
 import { SyncModule } from './sync/sync.module';
 import { AiModule } from './ai/ai.module';
 import { CreditsModule } from './credits/credits.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { CreditsModule } from './credits/credits.module';
     SyncModule,
     AiModule,
     CreditsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}
