@@ -267,6 +267,15 @@
       $('btn-csv').onclick = function () {
         fetch(API + '/admin/users.csv', { headers: { 'x-admin-token': token() } })
           .then(function (r) { return r.text(); })
+          .then(function (raw) {
+            // 后端统一用 { success, data } 包装，CSV 在 data 字段里，需要解包。
+            var text = raw;
+            try {
+              var j = JSON.parse(raw);
+              if (j && typeof j.data === 'string') text = j.data;
+            } catch (e) { /* 本身就是纯 CSV */ }
+            return text;
+          })
           .then(function (text) {
             var a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' }));
