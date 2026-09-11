@@ -7,6 +7,57 @@
 
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 
+/* ---------- 主题交叉渐变 · @property 让「变量本身」可插值 ----------
+   把语义色注册成 <color> 类型后，浏览器就能在切换主题时对自定义属性做补间，
+   于是所有引用这些变量的表面（底色 / 卡片 / 文字 / 边框 / 玻璃）会一起淡入新色。
+   相比给 `*` 逐个加 transition：不误伤一次性交互动画，也不用维护一长串选择器。
+   只注册「改动幅度大、覆盖面广」的变量；success/danger 这类语义徽章变化细微，
+   瞬时切换不可感知，不注册以压低每帧的样式重算量。
+   不支持 @property 的浏览器会忽略这些声明，退回改动前的瞬时切换，无副作用。 */
+@property --bg { syntax: "<color>"; inherits: true; initial-value: #f3efe6; }
+@property --surface { syntax: "<color>"; inherits: true; initial-value: #fbf9f3; }
+@property --surface-1 { syntax: "<color>"; inherits: true; initial-value: #f7f3ec; }
+@property --surface-2 { syntax: "<color>"; inherits: true; initial-value: #efe9df; }
+@property --surface-3 { syntax: "<color>"; inherits: true; initial-value: #e7e0d3; }
+@property --card { syntax: "<color>"; inherits: true; initial-value: rgba(252, 250, 244, 0.72); }
+@property --card-solid { syntax: "<color>"; inherits: true; initial-value: #fcfaf4; }
+@property --text { syntax: "<color>"; inherits: true; initial-value: #2b2620; }
+@property --text-2 { syntax: "<color>"; inherits: true; initial-value: #4a4339; }
+@property --text-muted { syntax: "<color>"; inherits: true; initial-value: #8a8073; }
+@property --text-faint { syntax: "<color>"; inherits: true; initial-value: #b3a99a; }
+@property --border { syntax: "<color>"; inherits: true; initial-value: rgba(43, 38, 32, 0.10); }
+@property --border-strong { syntax: "<color>"; inherits: true; initial-value: rgba(43, 38, 32, 0.16); }
+@property --brand { syntax: "<color>"; inherits: true; initial-value: #4f46e5; }
+@property --brand-soft { syntax: "<color>"; inherits: true; initial-value: rgba(79, 70, 229, 0.10); }
+@property --accent { syntax: "<color>"; inherits: true; initial-value: #2563eb; }
+@property --glass-base { syntax: "<color>"; inherits: true; initial-value: #c8ccd4; }
+@property --glass-highlight { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
+
+:root { --theme-fade: 400ms; }
+
+/* 只在首帧画完之后才启用过渡，否则页面加载时也会播一次换色动画 */
+html.theme-ready {
+  transition:
+    --bg var(--theme-fade) var(--ease-out),
+    --surface var(--theme-fade) var(--ease-out),
+    --surface-1 var(--theme-fade) var(--ease-out),
+    --surface-2 var(--theme-fade) var(--ease-out),
+    --surface-3 var(--theme-fade) var(--ease-out),
+    --card var(--theme-fade) var(--ease-out),
+    --card-solid var(--theme-fade) var(--ease-out),
+    --text var(--theme-fade) var(--ease-out),
+    --text-2 var(--theme-fade) var(--ease-out),
+    --text-muted var(--theme-fade) var(--ease-out),
+    --text-faint var(--theme-fade) var(--ease-out),
+    --border var(--theme-fade) var(--ease-out),
+    --border-strong var(--theme-fade) var(--ease-out),
+    --brand var(--theme-fade) var(--ease-out),
+    --brand-soft var(--theme-fade) var(--ease-out),
+    --accent var(--theme-fade) var(--ease-out),
+    --glass-base var(--theme-fade) var(--ease-out),
+    --glass-highlight var(--theme-fade) var(--ease-out);
+}
+
 body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
@@ -225,6 +276,130 @@ img, svg { display: block; max-width: 100%; }
 .nav-toggle .nav-morph { color: inherit; }
 .nav-toggle .nav-morph svg { display: block; }
 
+/* ---------- 主题切换 · 液态玻璃开关 ----------
+   形制参考抖音「乐笙设计」第 15 集「苹果前端能实现的按钮 UI 交互动效设计」：
+   玻璃胶囊轨道 + 直径大于轨道的圆钮（上下出檐成玻璃圆），圆钮左右滑动的同时
+   sun ↔ moon 弹簧形变，Light / Dark 标签在圆钮对侧交叉淡入，整页底色同步渐变。
+   几何全部落在 8pt 网格：轨道 88×32、圆钮 40、内边距 4（移动端收窄并隐去标签）。 */
+.theme-switch {
+  --ts-w: 88px;              /* 轨道宽（11×8） */
+  --ts-h: 32px;              /* 轨道高（4×8） */
+  --ts-knob: 40px;           /* 圆钮直径（5×8）—— 大于轨道，上下各出檐 4px */
+  --ts-pad: 4px;
+  --ts-travel: calc(var(--ts-w) - var(--ts-pad) * 2 - var(--ts-knob));  /* = 圆钮直径 */
+  position: relative;
+  flex: none;
+  width: var(--ts-w);
+  height: var(--ts-knob);    /* 按钮高度含出檐，圆钮不会溢出可点区域 */
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.theme-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+
+/* 轨道：与导航胶囊同一套玻璃材质（blur + saturate + 多层 inset 高光） */
+.theme-switch .ts-track {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: var(--ts-h);
+  transform: translateY(-50%);
+  border-radius: var(--r-full);
+  background-color: color-mix(in srgb, var(--glass-base) 14%, transparent);
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--glass-highlight) 24%, transparent) 0%,
+    color-mix(in srgb, var(--glass-base) 8%, transparent) 100%);
+  backdrop-filter: blur(8px) saturate(150%);
+  -webkit-backdrop-filter: blur(8px) saturate(150%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 26%), transparent),
+    inset 0 1px 2px color-mix(in srgb, var(--glass-shadow) 30%, transparent),
+    0 1px 6px -2px color-mix(in srgb, var(--glass-shadow) 18%, transparent);
+  transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.theme-switch:hover .ts-track {
+  background-color: color-mix(in srgb, var(--glass-base) 24%, transparent);
+}
+
+/* 圆钮：半透明玻璃体 + 斜向高光，靠 inset 高光而非 backdrop-filter 营造厚度，
+   避免在已有 backdrop-filter 的吸顶导航里再嵌一层模糊（滚动时重绘代价高）。 */
+.theme-switch .ts-knob {
+  position: absolute; left: var(--ts-pad); top: 50%;
+  width: var(--ts-knob); height: var(--ts-knob);
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--text);
+  transform: translate(0, -50%);
+  /* 透一点底，才像玻璃而不是白塑料：fill 只给 30%，高光集中在顶面，
+     四周不做均匀亮环（均匀环会让圆钮像贴纸）。
+     底料必须用 --glass-highlight（两个主题下都恒为白）而不是 --surface：
+     --surface 在深色主题会翻成暗色，30% 铺在暗底上等于什么都没有，
+     圆钮会退化成只剩 inset 亮边的「空心圆环」，和浅色态完全是两个东西。
+     物理上也该是白：凸起的玻璃钮受光，永远比周围亮。 */
+  background-color: color-mix(in srgb, var(--glass-highlight) 30%, transparent);
+  background-image: linear-gradient(155deg,
+    color-mix(in srgb, var(--glass-highlight) 26%, transparent) 0%,
+    transparent 52%,
+    color-mix(in srgb, var(--glass-shadow) 12%, transparent) 100%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 62%), transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 18%), transparent),
+    0 3px 10px -3px color-mix(in srgb, var(--glass-shadow) 36%, transparent);
+  /* 位移用「减速落位 + 一次回弹」的曲线，而不是弹性曲线：真物体是减速停下，
+     不会来回弹。刻意保留了约 4% 的过冲（2px 上下），
+     是为了复刻参考片里圆钮落位时那一下轻微回弹；
+     超过 8% 就会从「沉稳落位」滑向「弹跳玩具」，别再加。 */
+  transition:
+    transform 340ms cubic-bezier(0.34, 1.36, 0.52, 1),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+:root[data-theme='dark'] .theme-switch .ts-knob { transform: translate(var(--ts-travel), -50%); }
+.theme-switch:hover .ts-knob {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 76%), transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 26%), transparent),
+    0 4px 12px -3px color-mix(in srgb, var(--glass-shadow) 42%, transparent);
+}
+/* morphicons 只在 <svg> 上写死 fill:none，且不提供 fill 属性入口 —— 用 CSS 覆盖它：
+   太阳的圆盘与月牙才有实心体积（光线是零面积的开放路径，填充无副作用）。 */
+.theme-switch .ts-knob morph-icon svg { display: block; }
+.theme-switch .ts-knob morph-icon svg path { fill: currentColor; }
+
+/* 标签：始终待在圆钮对侧，切换时交叉淡入 + 轻微位移 */
+.theme-switch .ts-cap {
+  position: absolute; top: 50%;
+  transform: translateY(-50%);
+  display: grid; place-items: center;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text-2);
+  pointer-events: none;
+  /* transform 必须进 transition —— 否则那 4px 的横向位移是瞬移不是滑动。
+     标签只走 4px，弹簧对它没有意义（4% 过冲 = 0.16px，等于没有），
+     所以这里用纯减速：整个手势里只留圆钮一个「弹簧」，其余一律 ease-out，
+     避免两个不同节奏的弹簧互相打架。260ms 与圆钮的可感知落位时刻对齐。 */
+  transition:
+    opacity 260ms var(--ease-out),
+    transform 260ms var(--ease-out),
+    color var(--dur) var(--ease);
+}
+.theme-switch .ts-cap-light { left: calc(var(--ts-pad) + var(--ts-knob)); right: 6px; }
+.theme-switch .ts-cap-dark { left: 6px; right: calc(var(--ts-pad) + var(--ts-knob)); }
+/* 浅色主题：亮出「Light」；深色主题：亮出「Dark」 */
+.theme-switch .ts-cap-dark { opacity: 0; transform: translateY(-50%) translateX(4px); }
+:root[data-theme='dark'] .theme-switch .ts-cap-light { opacity: 0; transform: translateY(-50%) translateX(4px); }
+:root[data-theme='dark'] .theme-switch .ts-cap-dark { opacity: 1; transform: translateY(-50%); }
+
+/* 移动端：隐去标签只留圆钮，避免挤压导航胶囊 */
+@media (max-width: 720px) {
+  .theme-switch { --ts-w: 72px; }
+  .theme-switch .ts-cap { display: none; }
+}
+
 /* 透明降级（design-taste-frontend 强制约束）：用户开启「降低透明度」时，
    玻璃材质退化为实色半透明表面，保留长圆胶囊形态与基础投影，但去掉模糊/折射，
    避免可读性受损与 GPU 负担。浅色用 --surface，深色自动跟随 --surface 暗面。 */
@@ -249,6 +424,20 @@ img, svg { display: block; max-width: 100%; }
   .nav-actions .icon-btn {
     background-color: color-mix(in srgb, var(--surface-2) 86%, transparent);
     border-color: color-mix(in srgb, var(--glass-highlight) 18%, transparent);
+  }
+  /* 主题开关同样退化：轨道与圆钮改为实色表面，保留长圆形态与出檐关系。
+     圆钮这里刻意用 --surface 而不是常规范式里的 --glass-highlight：
+     常规范式要的是「受光凸起的玻璃」所以恒白；降级范式要的是「不透明实体表面」，
+     --surface 正是该主题的实体面 token，深色下它会跟着变暗，
+     与此时同样变亮的图标色（--text）自然配成高对比。两者不同是故意的。 */
+  .theme-switch .ts-track {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  }
+  .theme-switch .ts-knob {
+    background-color: color-mix(in srgb, var(--surface) 96%, transparent);
+    background-image: none;
   }
 }
 

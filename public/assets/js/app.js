@@ -43,6 +43,7 @@ function renderNav() {
   const seg = (location.hash.replace(/^#\//, '').split('/')[0]) || 'home';
   const links = NAV.map(n => `<a class="nav-link ${n.seg === seg ? 'active' : ''}" href="#/${n.seg}">${icon(n.icon, { size: 16 })}<span>${n.label}</span></a>`).join('');
   const isAuthed = store.isAuthed();
+  const isDark = document.documentElement.dataset.theme === 'dark';
   nav.innerHTML = `
     <div class="nav-inner">
       <a class="brand" href="#/home">
@@ -51,19 +52,32 @@ function renderNav() {
   </a>
       <nav class="nav-links">${links}</nav>
       <div class="nav-actions">
-        <button class="icon-btn" id="theme-btn" title="切换主题" aria-label="切换主题"><morph-icon id="theme-morph" icon="${ICON_D[document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon']}" size="20" stroke-width="1.8" aria-hidden="true"></morph-icon></button>
+        <button class="theme-switch" id="theme-btn" role="switch" aria-checked="${isDark}" title="${isDark ? '切换到浅色主题' : '切换到深色主题'}" aria-label="${isDark ? '切换到浅色主题' : '切换到深色主题'}">
+          <span class="ts-track" aria-hidden="true">
+            <span class="ts-cap ts-cap-light">Light</span>
+            <span class="ts-cap ts-cap-dark">Dark</span>
+          </span>
+          <span class="ts-knob" aria-hidden="true"><morph-icon id="theme-morph" icon="${ICON_D[isDark ? 'moon' : 'sun']}" size="19" stroke-width="1.8"></morph-icon></span>
+        </button>
         <a class="btn btn-soft btn-sm hide-sm" href="#/plan">${icon('calendar', { size: 15 })}<span>学习计划</span></a>
         <a class="btn btn-primary btn-sm" href="#/auth">${isAuthed ? icon('user', { size: 15 }) + '<span>' + store.state.user.name + '</span>' : icon('user', { size: 15 }) + '<span>登录</span>'}</a>
         <button class="icon-btn nav-toggle" id="nav-toggle" aria-label="菜单" aria-expanded="false" aria-controls="drawer">${burgerHtml()}</button>
       </div>
     </div>`;
-  // 主题切换走 morph-icon 弹簧形变（sun↔moon），不再整体重渲染导航——
-  // 顺带修掉旧 bug：savedTheme 是启动时的闭包常量，路由切换重渲染后图标会回退到启动主题。
-  document.getElementById('theme-btn').onclick = () => {
-    const wasDark = document.documentElement.dataset.theme === 'dark';
+  // 主题切换：圆钮滑动 + 图标 spring 形变 + 整页底色交叉渐变（@property 驱动，见 app.css）。
+  // 不整体重渲染导航 —— 顺带修掉旧 bug：savedTheme 是启动时的闭包常量，
+  // 路由切换重渲染后图标会回退到启动主题。
+  // 圆钮里的图标表示「当前处于哪个主题」（与 Light/Dark 标签一致）。
+  const themeBtn = document.getElementById('theme-btn');
+  themeBtn.onclick = () => {
     store.toggleTheme();
+    const nowDark = document.documentElement.dataset.theme === 'dark';
+    const label = nowDark ? '切换到浅色主题' : '切换到深色主题';
+    themeBtn.setAttribute('aria-checked', String(nowDark));
+    themeBtn.setAttribute('title', label);
+    themeBtn.setAttribute('aria-label', label);
     const m = document.getElementById('theme-morph');
-    if (m && m.morphTo) m.morphTo(ICON_D[wasDark ? 'moon' : 'sun'], 'snappy');
+    if (m && m.morphTo) m.morphTo(ICON_D[nowDark ? 'moon' : 'sun'], 'snappy');
   };
   document.getElementById('nav-toggle').onclick = toggleDrawer;
 }
@@ -144,3 +158,8 @@ document.addEventListener('state:hydrated', () => {
 // ---- Start ----
 renderNav();
 router.startRouter();
+
+// 主题交叉渐变要等首帧画完才启用：否则加载时会先播一次「浅色→当前主题」的换色动画。
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  document.documentElement.classList.add('theme-ready');
+}));
