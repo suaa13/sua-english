@@ -219,9 +219,12 @@
               kv('积分', esc(u.credits)) + kv('最近签到', esc(u.lastCheckIn || '未签到')) +
             '</div>' +
             '<div><div class="card-title mb-2">学习画像</div>' +
-              kv('词汇量', esc(p.vocabularySize || 0)) + kv('学习天数', esc(p.studyDays || 0)) +
-              kv('累计分钟', esc(p.totalStudyMinutes || 0)) + kv('等级', esc(p.englishLevel || '—')) +
-              kv('IELTS 目标', esc(p.ieltsTarget || '—')) + kv('TOEFL 目标', esc(p.toeflTarget || '—')) +
+              kv('词汇量', esc(s ? s.vocabTracked : (p.vocabularySize || 0))) +
+              kv('学习天数', esc(s ? s.activityDays : (p.studyDays || 0))) +
+              kv('累计分钟', esc(s ? s.totalMinutes : (p.totalStudyMinutes || 0))) +
+              kv('等级', esc(p.englishLevel || u.currentLevel || '—')) +
+              kv('IELTS 目标', esc(p.ieltsTarget || (u.targetExam === 'IELTS' ? u.targetScore : '') || '—')) +
+              kv('TOEFL 目标', esc(p.toeflTarget || (u.targetExam === 'TOEFL' ? u.targetScore : '') || '—')) +
             '</div>' +
             '<div><div class="card-title mb-2">学习数据（主状态快照）</div>' +
               (s ? (kv('练过的词', s.vocabTracked + '（已掌握 ' + s.vocabKnown + '）') +
