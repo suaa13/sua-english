@@ -40,7 +40,7 @@
         <h1 class="admin-title">SUA English · 管理后台</h1>
         <div class="admin-sub">查看已注册用户及其产生的学习数据（数据源：PostgreSQL / Supabase）</div>
       </div>
-      <div class="row">
+      <div class="row" id="head-actions" style="display:none">
         <a class="btn btn-ghost btn-sm" href="./#/home">← 返回站点</a>
         <button class="btn btn-soft btn-sm" id="btn-refresh">刷新</button>
         <button class="btn btn-soft btn-sm" id="btn-csv">导出 CSV</button>
@@ -186,10 +186,12 @@
         await loadUsers();
         $('gate').style.display = 'none';
         $('main').style.display = '';
+        $('head-actions').style.display = '';
       }
 
       function showGate(msg) {
         $('main').style.display = 'none';
+        $('head-actions').style.display = 'none';
         $('gate').style.display = '';
         if (msg) $('gate-msg').textContent = msg;
       }
