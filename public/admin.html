@@ -50,13 +50,14 @@
 
     <!-- 登录 -->
     <section class="card" id="gate" style="padding:20px">
-      <div class="card-title mb-3">管理员验证</div>
+      <div class="card-title mb-3">管理员登录</div>
       <p class="muted" style="font-size:13px;margin:0 0 12px">
-        请输入服务端配置的管理令牌（<span class="mono">ADMIN_TOKEN</span>）。令牌只保存在你本机浏览器，不写入任何用户账号。
+        使用管理员账号密码登录。登录凭证只保存在你本机浏览器，12 小时后自动失效。
       </p>
       <div class="row">
-        <input id="token" type="password" placeholder="管理令牌" style="flex:1;min-width:240px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)" />
-        <button class="btn btn-primary" id="btn-login">进入</button>
+        <input id="username" placeholder="管理员账号" autocomplete="username" style="flex:1;min-width:170px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)" />
+        <input id="password" type="password" placeholder="密码" autocomplete="current-password" style="flex:1;min-width:170px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)" />
+        <button class="btn btn-primary" id="btn-login">登录</button>
       </div>
       <div class="muted toast-line" id="gate-msg" style="margin-top:10px"></div>
     </section>
@@ -98,20 +99,42 @@
   <script>
     (function () {
       var API = (window.__SUA_API_BASE__) || (location.origin + '/api/v1');
-      var TOKEN_KEY = 'sua-admin-token';
+      var TOKEN_KEY = 'sua-admin-jwt';
+      var EXP_KEY = 'sua-admin-exp';
       var state = { page: 1, pageSize: 20, q: '', total: 0 };
 
       var $ = function (id) { return document.getElementById(id); };
 
-      function token() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
-      function setToken(v) { try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+      function jwt() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
+      function exp() { try { return Number(localStorage.getItem(EXP_KEY) || 0); } catch (e) { return 0; } }
+      function setSession(token, expiresAt) {
+        try {
+          if (token) {
+            localStorage.setItem(TOKEN_KEY, token);
+            localStorage.setItem(EXP_KEY, String(expiresAt || 0));
+          } else {
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(EXP_KEY);
+          }
+        } catch (e) {}
+      }
+      function clearSession() { setSession('', 0); }
+      /** 本地判断会话是否还在有效期内（真正的判定仍以服务端 401 为准）。 */
+      function hasLiveSession() { return !!jwt() && (!exp() || exp() > Date.now()); }
+
+      function authHeaders(extra) {
+        return Object.assign({ Authorization: 'Bearer ' + jwt() }, extra || {});
+      }
 
       async function call(path, opts) {
-        var res = await fetch(API + path, Object.assign({ headers: { 'x-admin-token': token() } }, opts || {}));
+        var o = Object.assign({}, opts || {});
+        o.headers = authHeaders(o.headers);
+        var res = await fetch(API + path, o);
         var body = null;
         try { body = await res.json(); } catch (e) { body = null; }
         if (res.status === 401 || res.status === 503) {
-          var err = new Error((body && body.message) || '管理令牌无效或未启用');
+          if (res.status === 401) clearSession();
+          var err = new Error((body && body.message) || (res.status === 503 ? '管理后台未启用' : '登录已失效，请重新登录'));
           err.code = res.status;
           throw err;
         }
@@ -132,18 +155,43 @@
 
       // ---------------- 登录 ----------------
       async function enter() {
-        var v = ($('token').value || '').trim();
-        if (!v) { $('gate-msg').textContent = '请输入管理令牌'; return; }
-        setToken(v);
+        var u = ($('username').value || '').trim();
+        var p = $('password').value || '';
+        if (!u || !p) { $('gate-msg').textContent = '请输入账号和密码'; return; }
+        $('btn-login').disabled = true;
+        $('gate-msg').textContent = '登录中…';
         try {
-          await loadOverview();
-          await loadUsers();
-          $('gate').style.display = 'none';
-          $('main').style.display = '';
+          var res = await fetch(API + '/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p }),
+          });
+          var body = await res.json().catch(function () { return null; });
+          var data = body && body.data !== undefined ? body.data : body;
+          if (!res.ok) throw new Error((body && body.message) || '登录失败');
+          setSession(data.token, data.expiresAt);
+          $('password').value = '';
+          $('gate-msg').textContent = '';
+          await showMain();
         } catch (e) {
-          setToken('');
-          $('gate-msg').textContent = e.message || '验证失败';
+          clearSession();
+          $('gate-msg').textContent = (e && e.message) || '登录失败';
+        } finally {
+          $('btn-login').disabled = false;
         }
+      }
+
+      async function showMain() {
+        await loadOverview();
+        await loadUsers();
+        $('gate').style.display = 'none';
+        $('main').style.display = '';
+      }
+
+      function showGate(msg) {
+        $('main').style.display = 'none';
+        $('gate').style.display = '';
+        if (msg) $('gate-msg').textContent = msg;
       }
 
       // ---------------- 概览 ----------------
@@ -265,17 +313,23 @@
 
       // ---------------- 事件 ----------------
       $('btn-login').onclick = enter;
-      $('token').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
-      $('btn-refresh').onclick = function () { loadOverview().then(loadUsers).catch(function (e) { alert(e.message); }); };
-      $('btn-search').onclick = function () { state.q = ($('q').value || '').trim(); state.page = 1; loadUsers().catch(function (e) { alert(e.message); }); };
+      $('username').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('password').focus(); });
+      $('password').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
+      $('btn-refresh').onclick = function () {
+        loadOverview().then(loadUsers).catch(function (e) { if (e.code === 401) showGate(e.message); else alert(e.message); });
+      };
+      $('btn-search').onclick = function () { state.q = ($('q').value || '').trim(); state.page = 1; loadUsers().catch(function (e) { if (e.code === 401) showGate(e.message); else alert(e.message); }); };
       $('q').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btn-search').click(); });
-      $('btn-clear').onclick = function () { $('q').value = ''; state.q = ''; state.page = 1; loadUsers().catch(function (e) { alert(e.message); }); };
-      $('prev').onclick = function () { if (state.page > 1) { state.page--; loadUsers(); } };
-      $('next').onclick = function () { state.page++; loadUsers().catch(function (e) { alert(e.message); }); };
-      $('btn-logout').onclick = function () { setToken(''); location.reload(); };
+      $('btn-clear').onclick = function () { $('q').value = ''; state.q = ''; state.page = 1; loadUsers().catch(function (e) { if (e.code === 401) showGate(e.message); else alert(e.message); }); };
+      $('prev').onclick = function () { if (state.page > 1) { state.page--; loadUsers().catch(function (e) { if (e.code === 401) showGate(e.message); }); } };
+      $('next').onclick = function () { state.page++; loadUsers().catch(function (e) { if (e.code === 401) showGate(e.message); else alert(e.message); }); };
+      $('btn-logout').onclick = function () { clearSession(); location.reload(); };
       $('btn-csv').onclick = function () {
-        fetch(API + '/admin/users.csv', { headers: { 'x-admin-token': token() } })
-          .then(function (r) { return r.text(); })
+        fetch(API + '/admin/users.csv', { headers: authHeaders() })
+          .then(function (r) {
+            if (r.status === 401) { clearSession(); showGate('登录已失效，请重新登录'); throw new Error('登录已失效'); }
+            return r.text();
+          })
           .then(function (raw) {
             // 后端统一用 { success, data } 包装，CSV 在 data 字段里，需要解包。
             var text = raw;
@@ -291,16 +345,15 @@
             a.download = 'sua-users.csv';
             a.click();
           })
-          .catch(function (e) { alert(e.message); });
+          .catch(function (e) { if (e.message !== '登录已失效') alert(e.message); });
       };
 
-      // 已保存过令牌则直接进入
-      if (token()) {
-        loadOverview().then(loadUsers).then(function () {
-          $('gate').style.display = 'none';
-          $('main').style.display = '';
-        }).catch(function (e) {
-          $('gate-msg').textContent = e.message || '验证失败，请重新输入令牌';
+      // 已有有效会话则直接进入，否则显示登录表单
+      if (hasLiveSession()) {
+        $('gate-msg').textContent = '恢复登录中…';
+        showMain().catch(function () {
+          clearSession();
+          showGate('登录已失效，请重新登录');
         });
       }
     })();
