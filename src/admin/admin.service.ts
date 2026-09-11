@@ -12,7 +12,7 @@ export class AdminService {
   /** 全站概览：用户数与各类学习数据总量 + 最近 7 天新增。 */
   async overview() {
     const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
-    const [users, users7d, progress, wrong, sessions, plans, appStates, activeUsers] =
+    const [users, users7d, progress, wrong, sessions, plans, appStateRows, sessionUsers] =
       await Promise.all([
         this.prisma.user.count(),
         this.prisma.user.count({ where: { createdAt: { gte: since } } }),
@@ -20,20 +20,32 @@ export class AdminService {
         this.prisma.wrongQuestion.count({ where: { deleted: false } }),
         this.prisma.studySession.count(),
         this.prisma.studyPlan.count(),
-        this.prisma.userAppState.count(),
-        // 有学习会话的用户数（真正"产生过数据"的人）
+        this.prisma.userAppState.findMany({ select: { userId: true, doc: true } }),
         this.prisma.studySession.groupBy({ by: ['userId'], _count: { _all: true } }),
       ]);
+
+    // 真实学习数据主要落在 UserAppState.doc（词汇进度/错题/活动/模考/计划）。
+    // 光看关系表会把"有数据的用户"统计成 0，所以这里取两者的并集。
+    const activeSet = new Set<string>();
+    sessionUsers.forEach((s) => activeSet.add(s.userId));
+    let appStatesWithContent = 0;
+    for (const row of appStateRows) {
+      if (this.hasContent(this.json(row.doc))) {
+        activeSet.add(row.userId);
+        appStatesWithContent++;
+      }
+    }
 
     return {
       users,
       newUsers7d: users7d,
-      activeUsers: activeUsers.length,
+      activeUsers: activeSet.size,
       progressRows: progress,
       wrongQuestions: wrong,
       studySessions: sessions,
       studyPlans: plans,
-      appStates: appStates,
+      appStates: appStateRows.length,
+      appStatesWithContent,
       storage: {
         engine: 'PostgreSQL (Supabase)',
         note: '用户账号 + 学习数据全部落在 Postgres；前端只保留一份本地缓存，以服务端为准。',
@@ -66,6 +78,7 @@ export class AdminService {
         take: pageSize,
         include: {
           profile: true,
+          appState: true,
           _count: { select: { progress: true, wrongQuestions: true, studySessions: true } },
         },
       }),
@@ -168,6 +181,7 @@ export class AdminService {
       take: 5000,
       include: {
         profile: true,
+        appState: true,
         _count: { select: { progress: true, wrongQuestions: true, studySessions: true } },
       },
     });
@@ -184,6 +198,16 @@ export class AdminService {
       'progress',
       'wrongQuestions',
       'studySessions',
+      'vocabTracked',
+      'vocabKnown',
+      'vocabLearning',
+      'errors',
+      'mocks',
+      'activityDays',
+      'totalItems',
+      'totalMinutes',
+      'streak',
+      'hasPlan',
       'vocabularySize',
       'studyDays',
       'totalStudyMinutes',
@@ -194,6 +218,7 @@ export class AdminService {
     };
     const lines = [head.join(',')];
     for (const u of users) {
+      const a = u.appState ? this.summarizeAppState(this.json(u.appState.doc)) : null;
       lines.push(
         [
           u.id,
@@ -208,6 +233,16 @@ export class AdminService {
           u._count.progress,
           u._count.wrongQuestions,
           u._count.studySessions,
+          a?.vocabTracked ?? '',
+          a?.vocabKnown ?? '',
+          a?.vocabLearning ?? '',
+          a?.errors ?? '',
+          a?.mocks ?? '',
+          a?.activityDays ?? '',
+          a?.totalItems ?? '',
+          a?.totalMinutes ?? '',
+          a?.streak ?? '',
+          a ? (a.hasPlan ? 'Y' : 'N') : '',
           u.profile?.vocabularySize ?? '',
           u.profile?.studyDays ?? '',
           u.profile?.totalStudyMinutes ?? '',
@@ -251,7 +286,19 @@ export class AdminService {
             studySessions: u._count.studySessions,
           }
         : undefined,
+      // 真实学习数据在 UserAppState.doc 里，列表也要带出来，否则会误显示为 0。
+      appSummary: u.appState ? this.summarizeAppState(this.json(u.appState.doc)) : null,
     };
+  }
+
+  /** 主状态是否含真实学习内容。 */
+  private hasContent(doc: any) {
+    if (!doc || typeof doc !== 'object') return false;
+    const vocab = doc.vocab && typeof doc.vocab === 'object' ? Object.keys(doc.vocab).length : 0;
+    const errors = Array.isArray(doc.errors) ? doc.errors.length : 0;
+    const activity = Array.isArray(doc.activity) ? doc.activity.length : 0;
+    const mocks = Array.isArray(doc.mocks) ? doc.mocks.length : 0;
+    return vocab + errors + activity + mocks + (doc.plan ? 1 : 0) > 0;
   }
 
   private json(s: string | null | undefined): any {

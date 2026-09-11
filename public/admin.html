@@ -83,7 +83,7 @@
             <thead>
               <tr>
                 <th>用户</th><th>注册时间</th><th>目标</th><th>积分</th>
-                <th>学习进度</th><th>错题</th><th>学习天数</th><th>主状态</th><th></th>
+                <th>练过的词</th><th>错题</th><th>活跃天数</th><th>累计答题</th><th></th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -170,15 +170,21 @@
         $('page-label').textContent = state.page + ' / ' + pages + '（共 ' + state.total + ' 人）';
         $('rows').innerHTML = (d.items || []).map(function (u) {
           var c = u.counts || {};
+          // 真实学习数据在 appSummary（UserAppState 快照）里；关系表仅作兜底。
+          var a = u.appSummary || null;
+          var words = a ? a.vocabTracked : ((u.profile && u.profile.vocabularySize) || 0);
+          var errors = a ? a.errors : (c.wrongQuestions || 0);
+          var days = a ? a.activityDays : (c.studySessions || 0);
+          var items = a ? a.totalItems : '—';
           return '<tr>' +
             '<td><div style="font-weight:600">' + esc(u.username) + '</div><div class="mono muted">' + esc(u.email) + '</div></td>' +
             '<td class="mono">' + fmtDate(u.createdAt) + '</td>' +
             '<td>' + esc(u.targetExam || '—') + (u.targetScore ? ' ' + esc(u.targetScore) : '') + '</td>' +
             '<td>' + (u.credits == null ? '—' : u.credits) + '</td>' +
-            '<td>' + (c.progress || 0) + '</td>' +
-            '<td>' + (c.wrongQuestions || 0) + '</td>' +
-            '<td>' + (c.studySessions || 0) + '</td>' +
-            '<td>' + (u.profile ? (u.profile.vocabularySize || 0) + ' 词' : '—') + '</td>' +
+            '<td>' + words + ' 词' + (a && a.vocabKnown ? '<div class="muted" style="font-size:11px">已掌握 ' + a.vocabKnown + '</div>' : '') + '</td>' +
+            '<td>' + errors + '</td>' +
+            '<td>' + days + '</td>' +
+            '<td>' + items + '</td>' +
             '<td><button class="btn btn-soft btn-sm" data-id="' + esc(u.id) + '">详情</button></td>' +
             '</tr>';
         }).join('') || '<tr><td colspan="9" class="muted">暂无用户</td></tr>';
