@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import { llmChat } from '../ai.js';
 import { scheduleSync, syncNow, markTombstone, markPlanRemoved, syncLabel } from '../sync.js';
 import { GUIDES } from '../guides.js';
+import { recordReview, awardXp as engineAwardXp } from '../learning-engine.js';
+import { store } from '../state.js';
 
 const PAGE_SIZE = 24;
 
@@ -183,28 +185,21 @@ const planTodayTasks = (plan) => dayTasks(plan, todayKey());
 const planTodayNewTotal = (plan) => planTodayTasks(plan).newTotal;
 const planTodayDone = (plan) => ((plan && plan.progress && plan.progress[todayKey()]) || 0);
 
-// ---- SM-2 间隔复习：答错立即重置，答对按 1→6→渐增 调度下次复习 ----
+// ---- 间隔复习：统一走 learning-engine（与词汇/错题同一套 SRS + 掌握度 + XP）----
+// 答错(quality 0)立即回盒0重练；答对(quality 3)按 Leitner 盒 + ease 拉长间隔。
 const recordSM2 = (b, ok) => {
   let list = loadWQ();
   let it = list.find((x) => x.id === b.id);
   if (!it) { addWQ(b); list = loadWQ(); it = list.find((x) => x.id === b.id); }
   if (!it) return;
   session.total++; if (ok) session.correct++;
-  if (ok) {
-    it.reps = (it.reps || 0) + 1;
-    if (it.reps === 1) it.interval = 1;
-    else if (it.reps === 2) it.interval = 6;
-    else it.interval = Math.max(1, Math.round((it.interval || 1) * (it.ease || 2.5)));
-    it.ease = Math.min(3.0, (it.ease || 2.5) + 0.1);
-    it.dueAt = Date.now() + (it.interval || 1) * DAY;
-  } else {
-    it.reps = 0; it.interval = 0;
-    it.ease = Math.max(1.3, (it.ease || 2.5) - 0.2);
-    it.dueAt = Date.now();
-  }
-  it.lastReview = Date.now();
-  it.updatedAt = it.lastReview;
+  // 把引擎算出的排程映射回错题本字段（dueAt/interval/ease/box/mastery/status）。
+  const u = recordReview(it, ok ? 3 : 0);
+  it.box = u.box; it.ease = u.ease; it.reps = u.reps; it.lapses = u.lapses;
+  it.interval = u.interval; it.dueAt = u.due; it.mastery = u.mastery; it.status = u.status;
+  it.lastReview = Date.now(); it.updatedAt = it.lastReview;
   saveWQ(list);
+  store.awardXp(engineAwardXp(u, ok ? 3 : 0)); // 题库练习也计入游戏化 XP
   refreshWqBadge();
   scheduleSync();
 };

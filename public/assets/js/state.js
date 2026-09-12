@@ -2,6 +2,7 @@
 import { fmtDate, uid } from './ui.js';
 import { api, setTokens, clearTokens, isAuthed, getRefreshToken } from './api.js';
 import { syncNow, flushAndClear, scheduleSync, markAppStateHydrated } from './sync.js';
+import { recordReview, advanceStreak, buildSession, levelFromXp, awardXp as engineAwardXp } from './learning-engine.js';
 
 const KEY = 'sua-english-v1';
 
@@ -21,6 +22,8 @@ const defaultState = () => ({
     joined: '',
     streak: 0,
     lastActive: '',
+    xp: 0,                 // 游戏化累计经验（Duolingo 式激励闭环），与 CEFR 的 level 分开
+    glevel: 1,             // 由 xp 推出的游戏等级
     credits: 0,            // 后端积分：走平台 AI 代理时每次消耗 1
     lastCheckIn: null,     // 最近签到日 YYYY-MM-DD（服务端日期）
   },
@@ -72,15 +75,25 @@ export const store = {
 
   // ---- vocabulary ----
   vocabStatus(id) { return state.vocab[id]?.status || 'new'; },
+  // 手动标记（learn.js 的"标记为掌握/学习中"开关）：映射到质量后交给引擎统一更新。
+  // 标 known → EASY(3)，标 learning → GOOD(2)，其余 → HARD(1)；并据此推进掌握度 + 发 XP。
   setVocab(id, status, correct, wrong) {
-    const cur = state.vocab[id] || { status: 'new', reps: 0, correct: 0, wrong: 0, lastSeen: null };
-    cur.reps += 1;
-    if (correct) cur.correct += 1; else if (wrong) cur.wrong += 1;
-    cur.status = status;
-    cur.lastSeen = fmtDate();
-    state.vocab[id] = cur;
+    const quality = status === 'known' ? 3 : status === 'learning' ? 2 : 1;
+    const updated = recordReview(state.vocab[id] || {}, quality);
+    if (status === 'known') { updated.mastery = Math.max(updated.mastery, 0.85); updated.status = 'known'; }
+    state.vocab[id] = updated;
+    this.awardXp(engineAwardXp(updated, quality));
     persist();
     scheduleSync();
+  },
+  // 真实练习回合计调入口（题库/错题/未来测验页都用它）：统一 SRS + 掌握度 + XP。
+  recordReview(id, quality) {
+    const updated = recordReview(state.vocab[id] || {}, quality);
+    state.vocab[id] = updated;
+    this.awardXp(engineAwardXp(updated, quality));
+    persist();
+    scheduleSync();
+    return updated;
   },
   vocabStats() {
     const v = Object.values(state.vocab);
@@ -131,16 +144,21 @@ export const store = {
     let a = state.activity.find(x => x.date === today);
     if (!a) { a = { date: today, mins: 0, items: 0 }; state.activity.push(a); }
     a.mins += mins; a.items += items;
-    // streak
-    if (state.user.lastActive !== today) {
-      const y = new Date(); y.setDate(y.getDate() - 1);
-      const yStr = fmtDate(y);
-      state.user.streak = (state.user.lastActive === yStr) ? state.user.streak + 1 : 1;
-      state.user.lastActive = today;
-    }
+    // streak：统一交给引擎，消除"前端 recordActivity / 后端 progress / 签到积分"三套互不连通的实现。
+    state.user.streak = advanceStreak(state.user.streak, state.user.lastActive, today);
+    state.user.lastActive = today;
     persist();
     scheduleSync();
   },
+  // 游戏化 XP：累加并按等级曲线推出 glevel。所有学习动作的唯一经验 sink。
+  awardXp(amount) {
+    if (!amount) return;
+    state.user.xp = (state.user.xp || 0) + amount;
+    state.user.glevel = levelFromXp(state.user.xp).level;
+    persist();
+  },
+  // 练习会话编排：到期复习优先 → 新词配额 → 最弱补足。供未来测验/复习页调用。
+  buildSession(candidates, opts) { return buildSession(candidates, opts); },
   totalMins() { return state.activity.reduce((a, x) => a + (x.mins || 0), 0); },
   totalItems() { return state.activity.reduce((a, x) => a + (x.items || 0), 0); },
   daysActive() { return new Set(state.activity.map(a => a.date)).size; },
@@ -297,6 +315,8 @@ function applyServerDoc(doc) {
   if (doc.user && typeof doc.user === 'object') {
     next.user.streak = Number(doc.user.streak) || 0;
     next.user.lastActive = doc.user.lastActive || '';
+    next.user.xp = Number(doc.user.xp) || 0;
+    next.user.glevel = Number(doc.user.glevel) || 1;
     next.user.joined = doc.user.joined || '';
     next.user.level = doc.user.level || next.user.level;
     next.user.exam = doc.user.exam || next.user.exam;
@@ -343,6 +363,8 @@ export function appStateDoc() {
     user: {
       streak: state.user.streak,
       lastActive: state.user.lastActive,
+      xp: state.user.xp,
+      glevel: state.user.glevel,
       joined: state.user.joined,
       level: state.user.level,
       exam: state.user.exam,
