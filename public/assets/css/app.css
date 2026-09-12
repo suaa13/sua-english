@@ -363,10 +363,45 @@ img, svg { display: block; max-width: 100%; }
     inset 0 0 0 1px color-mix(in srgb, var(--glass-highlight) calc(var(--glass-reflex-light) * 26%), transparent),
     0 4px 12px -3px color-mix(in srgb, var(--glass-shadow) 42%, transparent);
 }
+/* 圆钮里有两层图标（本体 + 光线），默认 grid 会把它们排成两行 —— 压到同一格重叠。
+   ⚠️ 必须同时给 `morph-icon > svg`：<morph-icon> 自己会设 `display: contents`，
+   于是它不生成盒子、内部那个 <svg> 被提升为 grid item，`> *` 选不到它，
+   它会自动落到第二行 —— 表现是「光线在上、圆盘在下」两半分开。
+   改动这里之后务必看逐帧截图确认两层同心。 */
+.theme-switch .ts-knob > *,
+.theme-switch .ts-knob > morph-icon > svg { grid-area: 1 / 1; }
+
 /* morphicons 只在 <svg> 上写死 fill:none，且不提供 fill 属性入口 —— 用 CSS 覆盖它：
-   太阳的圆盘与月牙才有实心体积（光线是零面积的开放路径，填充无副作用）。 */
+   太阳的圆盘与月牙才有实心体积。 */
 .theme-switch .ts-knob morph-icon svg { display: block; }
 .theme-switch .ts-knob morph-icon svg path { fill: currentColor; }
+
+/* 太阳的 8 条光线：独立图层，不参与路径形变（原因见 ui.js 里 sun 的注释）。
+   切到深色时缩回圆盘并淡出 —— 语义就是「光线收回，圆盘长成月牙」。
+   ⚠️ 尺寸与描边必须和 morph-icon 完全一致（同 24 viewBox + 19px + stroke-width 1.8），
+   否则两层粗细会对不上。
+   光线本身不设 fill：它们是零面积的开放路径，只有 stroke 会画出来。 */
+.theme-switch .ts-rays {
+  stroke: currentColor;
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: 50% 50%;
+  /* 回浅色时延后 120ms 再长回来：等圆盘先成形，否则光线先冒出来、再被圆盘补上，很碎 */
+  transition:
+    opacity 260ms var(--ease-out) 120ms,
+    transform 340ms var(--ease-out) 120ms;
+}
+:root[data-theme='dark'] .theme-switch .ts-rays {
+  opacity: 0;
+  transform: scale(0.68);
+  /* 去程不等：点下就和圆钮一起收回 */
+  transition-delay: 0ms, 0ms;
+}
+/* tokens.css 的全局「减少动态」只压 transition-duration，管不到 transition-delay。
+   不补这条，光线在减少动态下会晚 120ms 才出现在该在的位置。 */
+@media (prefers-reduced-motion: reduce) {
+  .theme-switch .ts-rays { transition-delay: 0ms !important; }
+}
 
 /* 标签：始终待在圆钮对侧，切换时交叉淡入 + 轻微位移 */
 .theme-switch .ts-cap {

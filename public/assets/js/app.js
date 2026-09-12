@@ -57,7 +57,10 @@ function renderNav() {
             <span class="ts-cap ts-cap-light">Light</span>
             <span class="ts-cap ts-cap-dark">Dark</span>
           </span>
-          <span class="ts-knob" aria-hidden="true"><morph-icon id="theme-morph" icon="${ICON_D[isDark ? 'moon' : 'sun']}" size="19" stroke-width="1.8"></morph-icon></span>
+          <span class="ts-knob" aria-hidden="true">
+            <svg class="ts-rays" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON_D.sunRays}"/></svg>
+            <morph-icon id="theme-morph" icon="${ICON_D[isDark ? 'moon' : 'sun']}" size="19" stroke-width="1.8"></morph-icon>
+          </span>
         </button>
         <a class="btn btn-soft btn-sm hide-sm" href="#/plan">${icon('calendar', { size: 15 })}<span>学习计划</span></a>
         <a class="btn btn-primary btn-sm" href="#/auth">${isAuthed ? icon('user', { size: 15 }) + '<span>' + store.state.user.name + '</span>' : icon('user', { size: 15 }) + '<span>登录</span>'}</a>
@@ -68,6 +71,9 @@ function renderNav() {
   // 不整体重渲染导航 —— 顺带修掉旧 bug：savedTheme 是启动时的闭包常量，
   // 路由切换重渲染后图标会回退到启动主题。
   // 圆钮里的图标表示「当前处于哪个主题」（与 Light/Dark 标签一致）。
+  // 图标分两层：本体（圆盘 ↔ 月牙）交给 morph-icon 做 1:1 形变，
+  // 8 条光线是独立 SVG，只缩回+淡出、不参与形变 —— 理由见 ui.js 里 sun 的注释。
+  // 光线的显隐纯靠 :root[data-theme='dark'] 的 CSS 驱动，这里不用管。
   const themeBtn = document.getElementById('theme-btn');
   themeBtn.onclick = () => {
     store.toggleTheme();
